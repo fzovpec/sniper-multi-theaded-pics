@@ -21,6 +21,8 @@
 #define MAX_NUM_SYSCALLS 4096
 #define MAX_NUM_THREADS_DEFAULT 128
 
+extern KNOB<INT64> KnobPacSimEnable;
+
 extern KNOB<std::string> KnobOutputFile;
 extern KNOB<UINT64> KnobBlocksize;
 extern KNOB<UINT64> KnobUseROI;

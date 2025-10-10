@@ -19,6 +19,7 @@ def usage():
         '  [-s <script>]' + \
         '  [--roi]' + \
         '  [--roi-script]' + \
+        '  [--pacsim]' + \
         '  [--viz]' + \
         '  [--viz-aso]' + \
         '  [--profile]' + \
@@ -62,6 +63,7 @@ outputdir = '.'
 configfiles = []
 sniperoptions = []
 roi_only = False
+enable_pacsim = False
 roi_script = False
 sim_end = 'first'
 sim_end_valid = ('first', 'last', 'last-restart')
@@ -198,7 +200,7 @@ def va2pa_valid():
   else:
     return True
 
-record_trace_passthrough = [ 'pid-continue', 'stop-address=', 'frontend-option=', 'maxthreads=' ]
+record_trace_passthrough = [ 'pid-continue', 'stop-address=', 'frontend-option=', 'maxthreads=', 'pacsim' ]
 
 try:
   opts, cmdline = getopt.getopt(
@@ -206,6 +208,7 @@ try:
     "hvn:m:d:c:g:s:",
     [
       "roi", "roi-script",
+      "pacsim",
       "viz", "viz-aso",
       "profile", "memory-profile", "cheetah",
       "perf", "valgrind", "wrap-sim=",
@@ -262,6 +265,9 @@ for o, a in opts:
     roi_only = True
   if o == '--roi-script':
     roi_script = True
+  if o == "--pacsim":
+    print ("[PacSim] When --pacsim is specified, sniper inst_mode_init is changed from cache_warmup to fast_forward, for MTR techniques.")
+    sniperoptions.append('-g --general/inst_mode_init=fast_forward')
   if o == '--sim-end':
     if a not in sim_end_valid:
       print('--sim-end value', a, 'invalid, need one of', sim_end_valid, file=sys.stderr)
@@ -651,7 +657,10 @@ if tracegen:
   if sde_arch:
     trace_extra_args += [ '--sde-arch=%(sde_arch)s' % locals() ]
   for app_id, (pre_cmd, app_cmd) in enumerate(applications):
-    tracecmd = pre_cmd + [ os.path.join(HOME, 'record-trace'), '-o', traceprefix ] + (['-v'] if verbose else []) + trace_extra_args + app_cmd
+    tracecmd = pre_cmd + [ os.path.join(HOME, 'record-trace'), '-o', traceprefix ]
+    if enable_pacsim:
+        tracecmd += ['--pacsim'] 
+    tracecmd += (['-v'] if verbose else []) + trace_extra_args + app_cmd
     tracecmds.append(tracecmd)
     if tracegen['redirect']: # redirect output
       threading.Thread(target = run_sniper.run_program_redirect, args = (app_id, run_sift_recorder, tracecmd, outputdir)).start()

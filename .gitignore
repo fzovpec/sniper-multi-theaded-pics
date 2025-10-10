@@ -3,7 +3,7 @@
 *.o
 *.pyc
 *.a
-
+xed/
 # emacs temp files
 *~
 

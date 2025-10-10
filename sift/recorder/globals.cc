@@ -19,6 +19,8 @@ KNOB<BOOL> KnobVerbose(KNOB_MODE_WRITEONCE, "pintool", "sniper:verbose", "0", "v
 KNOB<UINT64> KnobStopAddress(KNOB_MODE_WRITEONCE, "pintool", "sniper:stop", "0", "stop address (0 = disabled)");
 KNOB<UINT64> KnobMaxThreads(KNOB_MODE_WRITEONCE, "pintool", "sniper:maxthreads", "0", "maximum number of threads (0 = default)");
 
+KNOB<INT64> KnobPacSimEnable(KNOB_MODE_WRITEONCE, "pintool", "pacsim","0", "enable pacsim simulation; 0: disable, 1: enable");
+
 KNOB_COMMENT pinplay_driver_knob_family(KNOB_FAMILY, "PinPlay SIFT Recorder Knobs");
 #if defined(SDE_INIT)
 KNOB<BOOL>KnobReplayer(KNOB_MODE_WRITEONCE, KNOB_FAMILY,

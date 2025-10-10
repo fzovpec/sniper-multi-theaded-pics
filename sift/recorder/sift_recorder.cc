@@ -301,6 +301,12 @@ int main(int argc, char **argv)
 
    pinboost_register("SIFT_RECORDER", KnobDebug.Value());
 
+   int64_t pacsim_version = KnobPacSimEnable.Value();
+   
+   if (pacsim_version) {
+        std::cout << "[PacSim]: Pacsim is Enabled\n";
+   }
+
    PIN_StartProgram();
 
    return 0;
