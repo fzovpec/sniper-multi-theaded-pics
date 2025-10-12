@@ -103,12 +103,23 @@ tools = ['sde_sift_recorder']
 # Standalone programs
 programs = {}
 
+proj_dir=os.environ["SNIPER_ROOT"]
 # Always support pinplay
 mbuild.msgb('PINPLAY IS BEING USED')
 env.add_define('PINPLAY')
 env.add_include_dir(pinplay_include_dir)
 env.add_include_dir(instlib_include_dir)
 env.add_include_dir('./sift')
+
+env.add_include_dir(os.path.join(proj_dir,'./include/'))
+common_dir = os.path.join(proj_dir, "./common")
+items = os.listdir( common_dir)
+for item in items:
+    if  os.path.isdir( os.path.join(common_dir, item)):
+        env.add_include_dir(os.path.join(proj_dir,'./common/%s/'%item))
+#env.add_include_dir(os.path.join(proj_dir,'./common/misc'))
+#env.add_include_dir(os.path.join(proj_dir,'./common/system'))
+env.add_include_dir(os.path.join(proj_dir,'./common/core/memory_subsystem'))
 env.add_link_dir(pinplay_link_dir)
 env.add_link_dir(example_link_dir)
 add_link_libs(env)
@@ -123,7 +134,7 @@ if env.on_linux():
 
 # Tools sources
 tool_sources = {}
-tool_sources['sde_sift_recorder'] =  ['bbv_count.cc', 'emulation.cc','globals.cc','papi.cc','pinboost_debug.cc','recorder_base.cc','recorder_control.cc','sift_recorder.cc','syscall_modeling.cc','threads.cc','trace_rtn.cc' ]
+tool_sources['sde_sift_recorder'] =  ['bbv_count.cc', 'emulation.cc','globals.cc','papi.cc','pinboost_debug.cc','recorder_base.cc','recorder_control.cc','sift_recorder.cc','syscall_modeling.cc','threads.cc','trace_rtn.cc','mtng.cc','intrabarrier_mtng.cc','onlinebbv_count.cc','to_json.cc','bbv_count_cluster.cc','tool_warmup.cc','sift_warmup.cc','cond.cc','trietree.cc','intrabarrier_common.cc','pin_lock.cc' ]
 
 # Programs sources
 programs_sources = {}

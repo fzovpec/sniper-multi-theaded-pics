@@ -411,7 +411,7 @@ void closeFile(THREADID threadid)
 
       FILE *fp = fopen(filename, "w");
       fprintf(fp, "%" PRIu64 "\n", thread_data[threadid].bbv->getInstructionCount());
-      for(int i = 0; i < Bbv::NUM_BBV; ++i)
+      for(int i = 0; i < NUM_BBV; ++i)
          fprintf(fp, "%" PRIu64 "\n", thread_data[threadid].bbv->getDimension(i) / thread_data[threadid].bbv->getInstructionCount());
       fclose(fp);
 

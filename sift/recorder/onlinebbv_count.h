@@ -1,5 +1,5 @@
-#ifndef BBV_COUNT_H
-#define BBV_COUNT_H
+#ifndef ONLINE_BBV_COUNT_H
+#define ONLINE_BBV_COUNT_H
 
 #define __STDC_LIMIT_MACROS
 #include <stdint.h>
@@ -14,7 +14,7 @@ class Bbv
    public:
       // Number of dimensions to project BBVs to
       // Make sure this remains a multiple of four, or update the unrolled loop in BbvCount::count
-      static const int NUM_BBV = 16;
+//      static const int NUM_BBV = 16;
 
       Bbv();
       void count(uint64_t address, uint64_t count);

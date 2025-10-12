@@ -1,7 +1,7 @@
-#include "bbv_count.h"
+#include "onlinebbv_count.h"
 
 #include <algorithm>
-
+#include "globals.h"
 // RNG parameters, defaults taken from drand48
 #define RNG_A __UINT64_C(0x5DEECE66D)
 #define RNG_C __UINT64_C(0xB)
@@ -53,6 +53,6 @@ void
 Bbv::clear()
 {
    m_instrs = 0;
-   for(int i = 0; i < Bbv::NUM_BBV; ++i)
+   for(int i = 0; i < NUM_BBV; ++i)
       m_bbv_counts[i] = 0;
 }

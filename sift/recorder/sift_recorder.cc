@@ -14,7 +14,8 @@
 #include <sys/syscall.h>
 #include <string.h>
 #include <pthread.h>
-
+#include "intrabarrier_analysis.h"
+#include "intrabarrier_mtng.h"
 #include "pin.H"
 
 #if defined(SDE_INIT)
@@ -190,6 +191,7 @@ int main(int argc, char **argv)
    {
       max_num_threads = KnobMaxThreads.Value();
    }
+   init_global_bbv();
    size_t thread_data_size = max_num_threads * sizeof(*thread_data);
    if (posix_memalign((void**)&thread_data, LINE_SIZE_BYTES, thread_data_size) != 0)
    {
@@ -305,6 +307,7 @@ int main(int argc, char **argv)
    
    if (pacsim_version) {
         std::cout << "[PacSim]: Pacsim is Enabled\n";
+        intrabarrier_mtng::activate( false) ;
    }
 
    PIN_StartProgram();

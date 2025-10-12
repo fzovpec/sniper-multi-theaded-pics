@@ -2,6 +2,7 @@
 #define __GLOBALS_H
 
 #include "sift_format.h"
+#include "tool_warmup.h"
 
 #include "pin.H"
 #if defined(SDE_INIT)
@@ -20,8 +21,15 @@
 #define LINE_SIZE_BYTES 64
 #define MAX_NUM_SYSCALLS 4096
 #define MAX_NUM_THREADS_DEFAULT 128
-
+//#define NUM_BBV 16
+constexpr int NUM_BBV = 16;
 extern KNOB<INT64> KnobPacSimEnable;
+extern KNOB<double> KnobClusterThreshold;
+extern KNOB<uint64_t> KnobSampledRegionSize;
+extern KNOB<uint64_t> KnobMinimumSampledRegionSize;
+extern KNOB<std::string> KnobMtngDir;
+extern KNOB<std::string> KnobMtngClusterType;
+extern KNOB<std::string>  KnobArch;
 
 extern KNOB<std::string> KnobOutputFile;
 extern KNOB<UINT64> KnobBlocksize;
@@ -38,6 +46,7 @@ extern KNOB<INT64> KnobSiftAppId;
 extern KNOB<BOOL> KnobRoutineTracing;
 extern KNOB<BOOL> KnobRoutineTracingOutsideDetailed;
 extern KNOB<BOOL> KnobDebug;
+extern KNOB<std::string> KnobArch;
 extern KNOB<BOOL> KnobVerbose;
 extern KNOB<UINT64> KnobStopAddress;
 extern KNOB<UINT64> KnobMaxThreads;
@@ -86,5 +95,12 @@ typedef uint64_t syscall_args_t[6];
    typedef uint64_t syscall_args_t[6];
 #endif
 */
+
+extern std::vector<uint64_t> global_m_bbv_counts;
+extern std::vector<uint64_t> global_m_bbv_counters;
+void init_global_bbv();
+uint64_t get_bbv_thread_dim( uint32_t tid, uint32_t dim);
+uint64_t get_bbv_thread_counter( uint32_t tid);
+extern PinToolWarmup *getWarmupTool();
 
 #endif // __GLOBALS_H

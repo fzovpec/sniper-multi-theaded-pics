@@ -1,6 +1,8 @@
 #include "globals.h"
-
+#include "tool_warmup.h"
 KNOB<std::string> KnobOutputFile(KNOB_MODE_WRITEONCE, "pintool", "sniper:o", "trace", "output");
+
+
 KNOB<UINT64> KnobBlocksize(KNOB_MODE_WRITEONCE, "pintool", "sniper:b", "0", "blocksize");
 KNOB<UINT64> KnobUseROI(KNOB_MODE_WRITEONCE, "pintool", "sniper:roi", "0", "use ROI markers");
 KNOB<UINT64> KnobMPIImplicitROI(KNOB_MODE_WRITEONCE, "pintool", "sniper:roi-mpi", "0", "Implicit ROI between MPI_Init and MPI_Finalize");
@@ -20,7 +22,16 @@ KNOB<UINT64> KnobStopAddress(KNOB_MODE_WRITEONCE, "pintool", "sniper:stop", "0",
 KNOB<UINT64> KnobMaxThreads(KNOB_MODE_WRITEONCE, "pintool", "sniper:maxthreads", "0", "maximum number of threads (0 = default)");
 
 KNOB<INT64> KnobPacSimEnable(KNOB_MODE_WRITEONCE, "pintool", "pacsim","0", "enable pacsim simulation; 0: disable, 1: enable");
+KNOB<double> KnobClusterThreshold(KNOB_MODE_WRITEONCE, "pintool", "cluster-threshold","0.05", "cluster threshold");
+KNOB<uint64_t> KnobSampledRegionSize(KNOB_MODE_WRITEONCE, "pintool", "region-size","50000", "Sampled region size (K)");
+KNOB<uint64_t> KnobMinimumSampledRegionSize(KNOB_MODE_WRITEONCE, "pintool", "minimum-region-size","20000", "Sampled region size (K)");
 
+KNOB<std::string> KnobMtngDir(KNOB_MODE_WRITEONCE, "pintool", "mtng-dir", ".", "mtng data directory containing outputs from BarrierPoint and Simpoint");
+
+KNOB<std::string> KnobMtngClusterType(KNOB_MODE_WRITEONCE, "pintool", "cluster-type", "bbv", "mtng cluster type such as bbv, ldv or sv");
+
+
+KNOB<std::string> KnobArch(KNOB_MODE_WRITEONCE, "pintool", "arch", "gainestown", "archtecture to warmup");
 KNOB_COMMENT pinplay_driver_knob_family(KNOB_FAMILY, "PinPlay SIFT Recorder Knobs");
 #if defined(SDE_INIT)
 KNOB<BOOL>KnobReplayer(KNOB_MODE_WRITEONCE, KNOB_FAMILY,
@@ -56,3 +67,30 @@ Sift::Mode current_mode = Sift::ModeIcount;
 std::unordered_map<ADDRINT, bool> routines;
 
 extrae_image_t extrae_image;
+//KNOB<std::string>  KnobArch( KNOB_MODE_WRITEONCE, "pintool", "arch", "gainestown", "micro architecture");
+std::vector<uint64_t> global_m_bbv_counts;
+std::vector<uint64_t> global_m_bbv_counters;
+void init_global_bbv() {
+    global_m_bbv_counts.resize( MAX_NUM_THREADS_DEFAULT * NUM_BBV, 0 );
+    global_m_bbv_counters.resize( MAX_NUM_THREADS_DEFAULT, 0 );
+}
+uint64_t get_bbv_thread_dim( uint32_t tid, uint32_t dim ) { 
+    return global_m_bbv_counts[ tid * NUM_BBV + dim ];
+}
+uint64_t get_bbv_thread_counter( uint32_t tid ) { 
+    return global_m_bbv_counters[ tid  ];  
+}
+
+double getSystemTime()
+    {   
+        struct timeval timer;
+        gettimeofday(&timer, 0); 
+        return ((double)(timer.tv_sec) + (double)(timer.tv_usec)*1.0e-6);
+    }   
+ double time_stamp1;
+ double time_stamp_begin;
+ double time_stamp_end;
+//class PinToolWarmup;
+PinToolWarmup warmup_tool;
+PinToolWarmup* getWarmupTool() {return &warmup_tool;}
+

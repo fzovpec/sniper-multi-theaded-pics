@@ -3,7 +3,7 @@
 
 #include "globals.h"
 #include "sift_writer.h"
-#include "bbv_count.h"
+#include "onlinebbv_count.h"
 
 #include "pin.H"
 #include <deque>
