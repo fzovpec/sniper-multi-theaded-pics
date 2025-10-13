@@ -6,6 +6,7 @@
 xed/
 tags
 tmp/
+*.json
 # emacs temp files
 *~
 

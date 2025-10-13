@@ -1301,7 +1301,7 @@ class Predictor {
                 time_sum += feature_stack[elem].fs;
                 ins_num_sum += feature_stack[elem].max_ins_num;
             }
-            std::cout << "time sum: " << time_sum /1e15 << std::endl;
+            //std::cout << "time sum: " << time_sum /1e15 << std::endl;
             std::ofstream final_file;
             std::string res_dir = KnobMtngDir.Value();
             std::string full_path = res_dir + "/" + "intra_mtng.json";

@@ -22,7 +22,7 @@ ToolWarmup::ToolWarmup(Sift::Writer *_output, int id, bool global_sync)
    , m_starttime(std::time(0))
 {
       std::string arch_name = KnobArch.Value();
-      std::cout << "WarmUp using arch " << arch_name << std::endl;
+      //std::cout << "WarmUp using arch " << arch_name << std::endl;
       if( arch_name == "gainestown" ) {
         CACHE_SHARED_BY_CORES=4;
         CACHE_SIZE_BYTES = 8 * 1024 * 1024 ;

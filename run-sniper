@@ -266,8 +266,16 @@ for o, a in opts:
   if o == '--roi-script':
     roi_script = True
   if o == "--pacsim":
-    print ("[PacSim] When --pacsim is specified, sniper inst_mode_init is changed from cache_warmup to fast_forward, for MTR techniques.")
     sniperoptions.append('-g --general/inst_mode_init=fast_forward')
+    print("[PacSim]: enable region of interest (roi) only.")
+    roi_only = True
+    use_sift = True
+    enable_pacsim = True
+    #verbose = True
+    #sniperoptions.append('--roi')
+    #sniperoptions.append('--sift')
+    #sniperoptions.append('--v')
+
   if o == '--sim-end':
     if a not in sim_end_valid:
       print('--sim-end value', a, 'invalid, need one of', sim_end_valid, file=sys.stderr)
@@ -906,11 +914,16 @@ stopping = True
 t_end = time.time()
 t_elapsed = t_end - t_start
 print('[SNIPER] End')
-if enable_pacsim:
+#if enable_pacsim:
     
-    print('[SNIPER] Elapsed time:', '%.02f' % t_elapsed, 'seconds')
-else:
-    print('[SNIPER] Elapsed time:', '%.02f' % t_elapsed, 'seconds')
+#    print('[SNIPER] Elapsed time:', '%.02f' % t_elapsed, 'seconds')
+#else:
+print('[SNIPER] Elapsed time:', '%.02f' % t_elapsed, 'seconds')
+import pacsim 
+
+if enable_pacsim:
+    info = pacsim.get_sim_time("./")
+    print(info)
 
 if tracegen:
   # If we get here, there might still be some front-end processes running (maybe a deadlocked sift recorder trace?). If so, kill those processes

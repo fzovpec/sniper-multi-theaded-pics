@@ -371,7 +371,7 @@ class Predictor {
 
             std::pair<mtng::SimMode,uint32_t> decideNextSimMode( uint32_t freq ) {
                 uint64_t cluster_id = 0;
-                uint64_t hash = 0;
+//                uint64_t hash = 0;
                 mtng::SimMode next_mode;
                 if( unknown_clusterid.size() == 0 ) { // only have one cluster
                     cluster_id = last_predicted_cluster_id;
@@ -387,7 +387,8 @@ class Predictor {
                         cluster_id = last_predicted_cluster_id;
                     }
                 }
-                LOG2(INFO) << "predict cluster id : " << cluster_id << " "<<hash <<" " << history_queue_size << "\n";
+                //LOG2(INFO) << "predict cluster id : " << cluster_id << " "<<hash <<" " << history_queue_size << "\n";
+                
                 //last_predicted_cluster_id = cluster_id;
                 auto feature_key = FeatureKey<dvfs_enable>(cluster_id,freq);
                 auto clusterid2feature_it = clusterid2feature.find(feature_key);
@@ -496,11 +497,11 @@ class Predictor {
 //                }
                 //update predictor
                 if( ! if_predict_right( cluster_id ) ) {
-                    LOG2(INFO) << "predict : " << last_predicted_cluster_id << " actual cluster id : " << cluster_id << "\n"; 
+//                    LOG2(INFO) << "predict : " << last_predicted_cluster_id << " actual cluster id : " << cluster_id << "\n"; 
                     //update_predictor_size(); 
                 } else {
                     
-                    LOG2(INFO) << "predict success : " <<  cluster_id << "\n"; 
+  //                  LOG2(INFO) << "predict success : " <<  cluster_id << "\n"; 
                 }
 
                 last_predicted_cluster_id = cluster_id;
@@ -730,7 +731,7 @@ class Predictor {
             fs = thread_data[master_thread_id].output->Magic(SIM_CMD_GET_SIM_TIME, 0, 0 );
             l2_miss_count = thread_data[master_thread_id].output->Magic(SIM_CMD_GET_L2_MISS_COUNT, 0, 0 );
             l2_count = thread_data[master_thread_id].output->Magic(SIM_CMD_GET_L2_COUNT, 0, 0 );
-            LOG2(INFO) << "time: " <<  fs/1e15 << std::endl;
+            //LOG2(INFO) << "time: " <<  fs/1e15 << std::endl;
             uint64_t interval = fs - prior_fs;
             uint64_t interval_l2 = l2_count - prior_l2_count;
             uint64_t interval_l2_miss = l2_miss_count - prior_l2_miss_count;
@@ -743,7 +744,7 @@ class Predictor {
             prior_fs = thread_data[tid].output->Magic(SIM_CMD_GET_SIM_TIME, 0, 0 );
             prior_l2_miss_count = thread_data[tid].output->Magic(SIM_CMD_GET_L2_MISS_COUNT, 0, 0 );
             prior_l2_count = thread_data[tid].output->Magic(SIM_CMD_GET_L2_COUNT, 0, 0 );
-            LOG2(INFO) << "time: " <<  prior_fs/1e15 << std::endl;
+            //LOG2(INFO) << "time: " <<  prior_fs/1e15 << std::endl;
         }
         void recordState( ADDRINT addr , uint64_t cluster_id ) {
             if( mtng_current_mode == mtng::SimMode::DetailMode) {
@@ -886,7 +887,7 @@ class Predictor {
             }
         }
         void enable_warmup() {
-            LOG2(INFO) << "Start Warmup\n";
+            //LOG2(INFO) << "Start Warmup\n";
             getWarmupTool()->startWriteWarmupInstructions();
             global_count = 0;
             for( uint32_t i = 0 ; i < MAX_NUM_THREADS_DEFAULT ; i++ ) {
@@ -895,7 +896,7 @@ class Predictor {
         }
         void disable_warmup() {
             getWarmupTool()->stopWriteWarmupInstructions();
-            LOG2(INFO) << "End Warmup\n";
+            //LOG2(INFO) << "End Warmup\n";
             
             for( uint32_t i = 0 ; i < MAX_NUM_THREADS_DEFAULT ; i++ ) {
                 enable_warmup_vec[i] = 0;
@@ -909,9 +910,11 @@ class Predictor {
               }
               mtng_current_mode = ret;
               if( ret == mtng::SimMode::FastForwardMode ) {
+                  //LOG2(INFO) << "here1\n";
                    gotoFastForwardMode();
               } else if (ret == mtng::SimMode::DetailMode) {
 //                   gotoDetailMode();
+                   //LOG2(INFO) << "here2\n";
                     enable_warmup();                 
               }
 
@@ -992,7 +995,7 @@ class Predictor {
 
             ///for warmup
             if(enable_warmup_vec[tid]==1) {
-                getWarmupTool()->writeWarmupInstructions(tid);
+//                getWarmupTool()->writeWarmupInstructions(tid); //not compatible with sde, disable at first
                 if( tid == 0 ){
                      
                     disable_warmup();
@@ -1014,7 +1017,7 @@ class Predictor {
                 uint64_t current_ins = get_bbv_thread_counter(0);
                 uint64_t ins_interval = current_ins - bbv_ins_num_vec[0];
                 //LOG
-                LOG2(INFO) << ins_interval << "\n";
+                //LOG2(INFO) << ins_interval << "\n";
                 if( ins_interval < minimum_threshold ) { // we just has a small region and want to change the simulation mode
                     return SMALL_REGION_LABEL;
                 } 
@@ -1076,7 +1079,7 @@ class Predictor {
         mtng::SimMode decideNextSimMode( ADDRINT pcaddr ) {
             ///get predictor
                  
-            LOG2(INFO) <<"predict pc : " <<  pcaddr << std::endl;
+            //LOG2(INFO) <<"predict pc : " <<  pcaddr << std::endl;
             auto predictor_it = hash2predictor.find(pcaddr); ///different pc has different predictor
             Predictor<dvfs_enable> * predictor;
             if( predictor_it == hash2predictor.end() ) { //never saw this pc before; go to detailed mode
@@ -1124,7 +1127,7 @@ class Predictor {
             uint64_t cluster_id = getLastRegionClusterID();
 			double cluster_time_end = getSystemTime();
             time_distribution[TIME_CLUSTER] += cluster_time_end-cluster_time_begin;
-            LOG2(INFO) << record_type << " "<< cluster_id << "\n";
+            //LOG2(INFO) << record_type << " "<< cluster_id << "\n";
             if( cluster_id == SMALL_REGION_LABEL) {
                 if( record_type != mtng::RecordType::HardwareEvent ) {
                     return mtng_current_mode; 
@@ -1163,9 +1166,9 @@ class Predictor {
 
             resetCount();
 //            next_target = interval_ins_num_vec[0] + threshold;
-            LOG2(INFO) << "goto Analysis" << "\n";
+           // LOG2(INFO) << "goto Analysis" << "\n";
             
-            LOG2(INFO) << "clusterid:" << cluster_id << "\n";
+            //LOG2(INFO) << "clusterid:" << cluster_id << "\n";
             recordState( region_begin_pc,cluster_id );        
 
             feature.SetFreq( freq );
@@ -1174,13 +1177,13 @@ class Predictor {
             updateCurPredictor( region_begin_pc, cluster_id);
 
             feature_stack.push_back(feature);
-            LOG2(INFO) << feature << "\n";
+            //LOG2(INFO) << feature << "\n";
 
             if( record_type == mtng::RecordType::HardwareEvent ) {
                 freq = next_freq;
             }
             auto ret = decideNextSimMode(region_end_pc);
-            LOG2(INFO) << "next mode:" << ret << "\n";
+            //LOG2(INFO) << "next mode:" << ret << "\n";
 			double predict_time_end = getSystemTime();
             time_distribution[TIME_PREDICTION] += ( predict_time_end - cluster_time_end);
             return ret;
@@ -1231,7 +1234,8 @@ class Predictor {
         void processOmpBegin(ADDRINT pc_addr) {
             auto ret = processRegion<mtng::RecordType::MultiThread>(pc_addr);
 
-            LOG2(INFO) << "change mode to " << ret << "\n";
+            //LOG2(INFO) << "change mode to " << ret << "\n";
+
             changeSimMode( ret);
         }
         void processOmpEnd(ADDRINT pc_addr) {
@@ -1314,7 +1318,7 @@ class Predictor {
                 time_sum += feature_stack[elem].fs;
                 ins_num_sum += feature_stack[elem].max_ins_num;
             }
-            std::cout << "time sum: " << time_sum /1e15 << std::endl;
+            //std::cout << "time sum: " << time_sum /1e15 << std::endl;
             std::ofstream final_file;
             std::string res_dir = KnobMtngDir.Value();
             std::string full_path = res_dir + "/" + "intra_mtng.json";
@@ -1344,7 +1348,8 @@ class Predictor {
                 }
             }
 
-            std::cerr << "thread " << threadid << " master id: " << master_thread_id << " begin\n " ;
+            //std::cerr << "thread " << threadid << " master id: " << master_thread_id << " begin\n " ;
+
 
         }
         void threadEnd( THREADID threadid ) {
@@ -1355,7 +1360,7 @@ class Predictor {
                     break;
                 }
             }
-             std::cerr << "thread " << threadid << " master id: " << master_thread_id << " end\n " ;
+             //std::cerr << "thread " << threadid << " master id: " << master_thread_id << " end\n " ;
 
         }
 };

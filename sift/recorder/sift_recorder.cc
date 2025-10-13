@@ -3,7 +3,7 @@
 #include <stdlib.h>
 #include <syscall.h>
 #include <vector>
-
+#include "log2.h"
 #include <cstdio>
 #include <cassert>
 #include <unistd.h>
@@ -44,6 +44,7 @@ static CONTROLLER::CONTROL_MANAGER control("pinplay:");
 
 VOID Fini(INT32 code, VOID *v)
 {
+     thread_data[0].output->Magic(SIM_CMD_ROI_END, 0, 0);
    for (unsigned int i = 0 ; i < max_num_threads ; i++)
    {
       if (thread_data[i].output)
@@ -232,6 +233,8 @@ int main(int argc, char **argv)
       openFile(0);
    }
 
+
+   thread_data[0].output->Magic(SIM_CMD_ROI_START, 0, 0);
    // When attaching with --pid, there could be a number of threads already running.
    // Manually call NewThread() because the normal method to start new thread pipes (SYS_clone)
    // will already have happened
@@ -315,7 +318,7 @@ int main(int argc, char **argv)
    if (pacsim_version) {
         std::cout << "[PacSim]: Pacsim is Enabled\n";
         intrabarrier_mtng::activate( false) ;
-        initMtr();
+        //initMtr();
    }
 
    PIN_StartProgram();

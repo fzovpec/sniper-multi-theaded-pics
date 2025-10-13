@@ -281,7 +281,7 @@ else:
     cmd += '-pacsim 0'
   
   cmd += ' -- ' + ' '.join(cmdline)
-  print(cmd)
+#  print(cmd)
 
 if verbose:
   print('[SIFT_RECORDER]', 'Running', cmd)

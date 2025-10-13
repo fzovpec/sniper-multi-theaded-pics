@@ -85,7 +85,7 @@ class DistanceMatrix {
 //        for( uint32_t i = 0 ; i < distance_matrix_size + 1; i++) {
 //            std::cout << distance_buffer[i] << " ";
 //        }
-        std::cout << "\n";
+        //std::cout << "\n";
         distanceMatrix.push_back( distance_buffer );
         distance_matrix_size = distanceMatrix.size();
         resetdistancebuffer();
@@ -138,7 +138,7 @@ class BBVCluster {
         queue_id = 0;
         insnum_vec.resize(MAX_NUM_THREADS_DEFAULT,0);
         threshold = KnobClusterThreshold.Value();
-        std::cout << "threshold : " << KnobClusterThreshold.Value() << std::endl; 
+        //std::cout << "threshold : " << KnobClusterThreshold.Value() << std::endl; 
     }
     std::pair<double,bool> is_same_cluster( const double * bbv_base, const double * realBbv, const int max_thread_num,double threshold) {
          // If distance is less than THRESHOLD_DISTANCE
