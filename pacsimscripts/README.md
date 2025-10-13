@@ -1,6 +1,12 @@
 # PacSim
 We integrated the online sampled CPU methodology to speedup the simulation rate of the Sniper and now it is merged into the main sniper project!
 
+# Running an application
+An example of adding a flag *--pacsim* to use PacSim for running your application.”
+```bash
+run-sniper --pacsim -- cmdline
+```
+
 # Citation
 
 If you use or improve PacSim, please cite our TACO 2024 paper.
