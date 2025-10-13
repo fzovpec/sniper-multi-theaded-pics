@@ -52,6 +52,13 @@ VOID Fini(INT32 code, VOID *v)
       }
    }
 }
+void initMtr()
+{
+    mtr_enabled = true;
+    PinToolWarmup* warmup_tool = getWarmupTool();
+    warmup_tool->activate();
+}
+
 
 VOID Detach(VOID *v)
 {
@@ -85,7 +92,7 @@ VOID forkAfterInChild(THREADID threadid, const CONTEXT *ctxt, VOID *v)
    app_id = child_app_id;
    num_threads = 1;
    // Open new SIFT pipe for thread 0
-   thread_data[0].bbv = new Bbv();
+   thread_data[0].bbv = new Bbv(0);
    openFile(0);
 }
 
@@ -304,10 +311,11 @@ int main(int argc, char **argv)
    pinboost_register("SIFT_RECORDER", KnobDebug.Value());
 
    int64_t pacsim_version = KnobPacSimEnable.Value();
-   
+   mtr_enabled = false; 
    if (pacsim_version) {
         std::cout << "[PacSim]: Pacsim is Enabled\n";
         intrabarrier_mtng::activate( false) ;
+        initMtr();
    }
 
    PIN_StartProgram();

@@ -99,6 +99,95 @@ UInt64 MagicServer::Magic_unlocked(thread_id_t thread_id, core_id_t core_id, UIn
          return setInstrumentationMode(arg0);
       case SIM_CMD_MHZ_GET:
          return getFrequency(arg0);
+      case SIM_CMD_GET_SIM_TIME:
+      {   
+          StatsMetricBase * tmp = Sim()->getStatsManager()->getMetricObject("barrier", 0,"global_time");
+          if(tmp == NULL) {
+            return 0;
+          } else { 
+            UInt64 ret = tmp->recordMetric();
+            return ret;
+          }   
+//         Core *core = Sim()->getCoreManager()->getCoreFromID(core_id);
+//         SubsecondTime curr_elapsed_time = core->getPerformanceModel()->getElapsedTime();
+//         return curr_elapsed_time.getFS();
+      }   
+      case SIM_CMD_GET_INS_NUM:
+      {   
+          StatsMetricBase * tmp = Sim()->getStatsManager()->getMetricObject("core", arg0,"instructions");
+          if(tmp == NULL) {
+            return 0;
+          } else {
+                
+            UInt64 ret = tmp->recordMetric();
+            return ret;
+          }   
+      } 
+          case SIM_CMD_GET_L2_COUNT:
+      {
+          UInt32 total_cores = Sim()->getConfig()->getApplicationCores();
+          UInt64 total_load_count=0;
+          UInt64 total_store_count=0;
+
+          for (uint32_t core_i = 0 ; core_i < total_cores ; core_i++) {
+                StatsMetricBase * tmp = Sim()->getStatsManager()->getMetricObject("L2", core_i,"stores");
+                UInt64 store_count;
+                if(tmp == NULL) {
+                  store_count = 0;
+                } else {
+                  UInt64 ret = tmp->recordMetric();
+                  store_count = ret;
+                }
+                tmp = Sim()->getStatsManager()->getMetricObject("L2", core_i,"loads");
+                UInt64 load_count;
+                if(tmp == NULL) {
+                  load_count = 0;
+                } else {
+                  UInt64 ret = tmp->recordMetric();
+                  load_count = ret;
+                }
+                total_load_count += load_count;
+                total_store_count += store_count;
+          }
+          //return load_count + store_count;
+          return total_load_count + total_store_count;
+      }
+   case SIM_CMD_GET_L2_MISS_COUNT:
+      {   
+          UInt32 total_cores = Sim()->getConfig()->getApplicationCores();
+//          SInt64 total_cores = Sim()->getConfig()->getInt("general/total_cores")
+          UInt64 total_load_count=0;
+          UInt64 total_store_count=0;
+          for (uint32_t core_i = 0 ; core_i < total_cores ; core_i++) {
+                StatsMetricBase * tmp = Sim()->getStatsManager()->getMetricObject("L2", core_i,"store-misses");
+                UInt64 store_count;
+                if(tmp == NULL) {
+                  store_count = 0;
+                } else { 
+                  UInt64 ret = tmp->recordMetric();
+                  store_count = ret;
+                }
+                tmp = Sim()->getStatsManager()->getMetricObject("L2", core_i,"load-misses");
+                UInt64 load_count;
+                if(tmp == NULL) {
+                  load_count = 0;
+                } else { 
+                  UInt64 ret = tmp->recordMetric();
+                  load_count = ret;
+                }
+                total_load_count += load_count;
+                total_store_count += store_count;
+          }
+          return total_load_count + total_store_count;
+      }
+   case SIM_CMD_GET_BARRIER_REACHED:
+      {  
+         bool reached = Sim()->getClockSkewMinimizationServer()->onlyMainCoreRunning();
+         UInt64 ret = (UInt64)reached;
+         Sim()->getClockSkewMinimizationServer()->printState();
+         return ret;
+      }
+
       default:
          LOG_ASSERT_ERROR(false, "Got invalid Magic %lu, arg0(%lu) arg1(%lu)", cmd, arg0, arg1);
    }

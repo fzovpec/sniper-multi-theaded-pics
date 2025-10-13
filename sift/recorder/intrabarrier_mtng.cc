@@ -17,7 +17,7 @@
 #include "sim_api.h"
 #include "onlinebbv_count.h"
 #include "globals.h"
-#include "hooks_manager.h"
+//#include "hooks_manager.h"
 #include "recorder_control.h"
 #include "sift/sift_format.h"
 #include "sift_assert.h"
@@ -1013,6 +1013,8 @@ class Predictor {
             {
                 uint64_t current_ins = get_bbv_thread_counter(0);
                 uint64_t ins_interval = current_ins - bbv_ins_num_vec[0];
+                //LOG
+                LOG2(INFO) << ins_interval << "\n";
                 if( ins_interval < minimum_threshold ) { // we just has a small region and want to change the simulation mode
                     return SMALL_REGION_LABEL;
                 } 
@@ -1117,12 +1119,12 @@ class Predictor {
         template< mtng::RecordType record_type >
         mtng::SimMode processRegion( ADDRINT pcaddr  ) {
 //            Record record;
-            LOG2(INFO) << record_type << "\n";
 
 			double cluster_time_begin = getSystemTime();
             uint64_t cluster_id = getLastRegionClusterID();
 			double cluster_time_end = getSystemTime();
             time_distribution[TIME_CLUSTER] += cluster_time_end-cluster_time_begin;
+            LOG2(INFO) << record_type << " "<< cluster_id << "\n";
             if( cluster_id == SMALL_REGION_LABEL) {
                 if( record_type != mtng::RecordType::HardwareEvent ) {
                     return mtng_current_mode; 
@@ -1228,6 +1230,8 @@ class Predictor {
 
         void processOmpBegin(ADDRINT pc_addr) {
             auto ret = processRegion<mtng::RecordType::MultiThread>(pc_addr);
+
+            LOG2(INFO) << "change mode to " << ret << "\n";
             changeSimMode( ret);
         }
         void processOmpEnd(ADDRINT pc_addr) {
@@ -1366,7 +1370,6 @@ class Predictor {
         if(threadid!=0) return;
         auto * mtng_ptr = VirtualMtng::toMtng(v);
         mtng_ptr->processOmpBegin( pc_addr );
-        LOG2(INFO) << "after change mode" << "\n";
 //        mtng_ptr->detectUnknownBB( threadid, 0 , pc_addr) ;
        
 

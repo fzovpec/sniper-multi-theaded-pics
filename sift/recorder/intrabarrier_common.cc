@@ -22,12 +22,12 @@
 #include "sift/sift_format.h"
 #include "sift_assert.h"
 #include "sim_api.h"
-#include "threads.h"
+//#include "threads.h"
 #include <cstdint>
 #include <set>
 #include <utility>
 #include <sstream>
-#include "threads.h"
+//#include "threads.h"
 #include "cond.h"
 #include "tool_warmup.h"
 #include <set>

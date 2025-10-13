@@ -19,7 +19,7 @@
 #include "sim_api.h"
 #include "onlinebbv_count.h"
 #include "globals.h"
-#include "hooks_manager.h"
+//#include "hooks_manager.h"
 #include "recorder_control.h"
 #include "sift/sift_format.h"
 #include "sift_assert.h"

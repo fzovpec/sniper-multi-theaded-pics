@@ -6,7 +6,7 @@
 #include <unistd.h>
 #include <syscall.h>
 #include <linux/futex.h>
-
+//#include "onlinebbv_count.h"
 // Enable the below to print out sizeof(thread_data_t) at compile time
 #if 0
 // http://stackoverflow.com/questions/7931358/printing-sizeoft-at-compile-time
@@ -34,8 +34,10 @@ static VOID threadStart(THREADID threadid, CONTEXT *ctxt, INT32 flags, VOID *v)
    }
    PIN_ReleaseLock(&new_threadid_lock);
 
-   thread_data[threadid].thread_num = num_threads++;
-   thread_data[threadid].bbv = new Bbv();
+   //thread_data[threadid].thread_num = num_threads++;
+   
+   thread_data[threadid].thread_num = threadid;
+   thread_data[threadid].bbv = new Bbv(threadid);
 
    if (threadid > 0 && (any_thread_in_detail || KnobEmulateSyscalls.Value()))
    {

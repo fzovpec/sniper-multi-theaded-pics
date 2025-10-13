@@ -24,7 +24,7 @@ KNOB<UINT64> KnobMaxThreads(KNOB_MODE_WRITEONCE, "pintool", "sniper:maxthreads",
 KNOB<INT64> KnobPacSimEnable(KNOB_MODE_WRITEONCE, "pintool", "pacsim","0", "enable pacsim simulation; 0: disable, 1: enable");
 KNOB<double> KnobClusterThreshold(KNOB_MODE_WRITEONCE, "pintool", "cluster-threshold","0.05", "cluster threshold");
 KNOB<uint64_t> KnobSampledRegionSize(KNOB_MODE_WRITEONCE, "pintool", "region-size","50000", "Sampled region size (K)");
-KNOB<uint64_t> KnobMinimumSampledRegionSize(KNOB_MODE_WRITEONCE, "pintool", "minimum-region-size","20000", "Sampled region size (K)");
+KNOB<uint64_t> KnobMinimumSampledRegionSize(KNOB_MODE_WRITEONCE, "pintool", "minimum-region-size","2000", "Sampled region size (K)");
 
 KNOB<std::string> KnobMtngDir(KNOB_MODE_WRITEONCE, "pintool", "mtng-dir", ".", "mtng data directory containing outputs from BarrierPoint and Simpoint");
 
@@ -93,4 +93,4 @@ double getSystemTime()
 //class PinToolWarmup;
 PinToolWarmup warmup_tool;
 PinToolWarmup* getWarmupTool() {return &warmup_tool;}
-
+bool mtr_enabled;

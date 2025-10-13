@@ -906,7 +906,11 @@ stopping = True
 t_end = time.time()
 t_elapsed = t_end - t_start
 print('[SNIPER] End')
-print('[SNIPER] Elapsed time:', '%.02f' % t_elapsed, 'seconds')
+if enable_pacsim:
+    
+    print('[SNIPER] Elapsed time:', '%.02f' % t_elapsed, 'seconds')
+else:
+    print('[SNIPER] Elapsed time:', '%.02f' % t_elapsed, 'seconds')
 
 if tracegen:
   # If we get here, there might still be some front-end processes running (maybe a deadlocked sift recorder trace?). If so, kill those processes

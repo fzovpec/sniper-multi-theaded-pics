@@ -32,6 +32,12 @@ UInt64 handleMagicInstruction(thread_id_t thread_id, UInt64 cmd, UInt64 arg0, UI
    case SIM_CMD_USER:
    case SIM_CMD_INSTRUMENT_MODE:
    case SIM_CMD_MHZ_GET:
+   case SIM_CMD_GET_SIM_TIME:
+   case SIM_CMD_GET_L2_COUNT:
+   case SIM_CMD_GET_L2_MISS_COUNT:
+   case SIM_CMD_GET_INS_NUM:
+   case SIM_CMD_GET_BARRIER_REACHED:
+
    case SIM_CMD_SET_THREAD_NAME:
       return handleMagic(thread_id, cmd, arg0, arg1);
    case SIM_CMD_PROC_ID:

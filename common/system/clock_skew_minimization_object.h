@@ -64,7 +64,7 @@ public:
    virtual SubsecondTime getGlobalTime(bool upper_bound = false);
    virtual void setBarrierInterval(SubsecondTime barrier_interval) = 0;
    virtual SubsecondTime getBarrierInterval() const = 0;
-
+   virtual bool onlyMainCoreRunning(void) = 0;
    virtual void printState(void) {}
 };
 

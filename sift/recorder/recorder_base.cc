@@ -1,5 +1,6 @@
 #include "recorder_base.h"
 #include "globals.h"
+#include "log2.h"
 #include "threads.h"
 #include "sift_assert.h"
 #include "recorder_control.h"
@@ -48,9 +49,11 @@ VOID sendInstruction(THREADID threadid, ADDRINT addr, UINT32 size, UINT32 num_ad
 
 
    // Reconstruct basic blocks (we could ask Pin, but do it the same way as TraceThread will do it)
+//   LOG2(INFO) << "??????";
    if (thread_data[threadid].bbv_end || thread_data[threadid].bbv_last != addr)
    {
       // We're the start of a new basic block
+      //LOG2(INFO) << "????? count";
       thread_data[threadid].bbv->count(thread_data[threadid].bbv_base, thread_data[threadid].bbv_count);
       thread_data[threadid].bbv_base = addr;
       thread_data[threadid].bbv_count = 0;

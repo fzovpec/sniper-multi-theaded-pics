@@ -50,7 +50,7 @@ class BarrierSyncServer : public ClockSkewMinimizationServer
    public:
       BarrierSyncServer();
       ~BarrierSyncServer();
-
+      bool onlyMainCoreRunning(void) ;
       virtual void setDisable(bool disable);
       virtual void setGroup(core_id_t core_id, core_id_t master_core_id);
       void synchronize(core_id_t core_id, SubsecondTime time);

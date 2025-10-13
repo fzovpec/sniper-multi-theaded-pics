@@ -389,6 +389,32 @@ BarrierSyncServer::setFastForward(bool fastforward, SubsecondTime next_barrier_t
    }
 }
 
+bool
+BarrierSyncServer::onlyMainCoreRunning(void)
+{
+   uint32_t active_core = 0;
+   for(core_id_t core_id = 0; core_id < (core_id_t) Sim()->getConfig()->getApplicationCores(); core_id++)
+   {   
+      if (m_core_group[core_id] != INVALID_CORE_ID)
+      {   
+        return false;
+      }   
+      else if (m_barrier_acquire_list[core_id] == true)
+      {   
+         if (m_local_clock_list[core_id] >= m_next_barrier_time)
+            printf(" ^");
+         else
+            printf(" A");
+      }   
+      else if (isCoreRunning(core_id))
+      {   
+        active_core++;
+      }   
+   }   
+   return (active_core==1);
+}
+
+
 void
 BarrierSyncServer::printState(void)
 {

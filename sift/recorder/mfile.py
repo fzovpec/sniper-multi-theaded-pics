@@ -134,7 +134,7 @@ if env.on_linux():
 
 # Tools sources
 tool_sources = {}
-tool_sources['sde_sift_recorder'] =  ['bbv_count.cc', 'emulation.cc','globals.cc','papi.cc','pinboost_debug.cc','recorder_base.cc','recorder_control.cc','sift_recorder.cc','syscall_modeling.cc','threads.cc','trace_rtn.cc','mtng.cc','intrabarrier_mtng.cc','onlinebbv_count.cc','to_json.cc','bbv_count_cluster.cc','tool_warmup.cc','sift_warmup.cc','cond.cc','trietree.cc','intrabarrier_common.cc','pin_lock.cc' ]
+tool_sources['sde_sift_recorder'] =  [ 'emulation.cc','globals.cc','papi.cc','pinboost_debug.cc','recorder_base.cc','recorder_control.cc','sift_recorder.cc','syscall_modeling.cc','threads.cc','trace_rtn.cc','mtng.cc','intrabarrier_mtng.cc','onlinebbv_count.cc','to_json.cc','bbv_count_cluster.cc','tool_warmup.cc','sift_warmup.cc','cond.cc','trietree.cc','intrabarrier_common.cc','pin_lock.cc' ]
 
 # Programs sources
 programs_sources = {}

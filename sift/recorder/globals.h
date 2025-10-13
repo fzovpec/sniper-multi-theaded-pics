@@ -17,7 +17,7 @@
 
 //#define DEBUG_OUTPUT 1
 #define DEBUG_OUTPUT 0
-
+extern bool mtr_enabled;
 #define LINE_SIZE_BYTES 64
 #define MAX_NUM_SYSCALLS 4096
 #define MAX_NUM_THREADS_DEFAULT 128

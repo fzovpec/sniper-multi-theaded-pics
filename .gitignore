@@ -4,6 +4,8 @@
 *.pyc
 *.a
 xed/
+tags
+tmp/
 # emacs temp files
 *~
 
