@@ -124,6 +124,15 @@ namespace Sift
          uint64_t getLength();
          bool getTraceHasPhysicalAddresses() const { return m_trace_has_pa; }
          uint64_t va2pa(uint64_t va);
+         void sendResponseAfterContextSwitch()
+         {
+            uint64_t ack = 0;
+            sendSimpleResponse(RecOtherMagicInstructionResponse, &ack, sizeof(ack));
+         }
+
+         char* getFilename() const { return m_filename; }
+         char* getResponseFilename() const { return m_response_filename; }
+         int getId() const { return m_id; }
 
 	 void frontEndStop();
    };
