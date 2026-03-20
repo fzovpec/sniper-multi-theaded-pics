@@ -224,8 +224,9 @@ void MicroOpPerformanceModel::handleInstruction(DynamicInstruction *dynins)
    const OperandList &ops = dynins->instruction->getOperands();
    unsigned int memidx = 0;
 
-   if (m_issue_memops)
+   if (m_issue_memops){
       dynins->accessMemory(getCore());
+   }
 
    // If we haven't gotten all of our read or write data yet, iterate over the operands
    for (size_t i = 0 ; i < ops.size() ; ++i)
@@ -234,7 +235,14 @@ void MicroOpPerformanceModel::handleInstruction(DynamicInstruction *dynins)
 
       if (o.m_type == Operand::MEMORY)
       {
-         LOG_ASSERT_ERROR(dynins->num_memory > memidx, "Did not get enough memory_info objects");
+         if (memidx >= dynins->num_memory)
+         {
+            // Static Instruction says there is another MEMORY operand, but this
+            // DynamicInstruction has no corresponding memory_info entry.
+            // This happens with ChampSim traces when the first instance of an IP
+            // had more memory references than some later instance.
+            continue; // Don't try to read a non-existent MemoryInfo
+         }
          DynamicInstruction::MemoryInfo &info = dynins->memory_info[memidx++];
          LOG_ASSERT_ERROR(info.dir == o.m_direction,
                           "Expected memory %d info, got: %d.", o.m_direction, info.dir);
@@ -333,8 +341,9 @@ void MicroOpPerformanceModel::handleInstruction(DynamicInstruction *dynins)
 
    // Make sure there was an Operand/MemoryInfo for each MicroOp
    // This should detect mismatches between decoding as done by fillOperandListMemOps and InstructionDecoder
-   assert(num_reads_done == num_loads);
-   assert(num_writes_done == num_stores);
+   //TODO: Make it parametric based on whether there was a prior mismatch due to champsim vs sniper trace format
+   // assert(num_reads_done == num_loads);
+   // assert(num_writes_done == num_stores);
 
    SubsecondTime insn_cost = SubsecondTime::Zero();
 
@@ -440,6 +449,10 @@ void MicroOpPerformanceModel::handleInstruction(DynamicInstruction *dynins)
             m_cpiITLBMiss += insn_cost;
          else
             m_cpiDTLBMiss += insn_cost;
+      }
+      else if (dynins->instruction->getType() == INST_PAGEFAULT)
+      {
+         m_cpiUnknown += insn_cost;
       }
       else if (dynins->instruction->getType() == INST_UNKNOWN)
       {

@@ -4,6 +4,7 @@
 #include "fixed_types.h"
 #include "subsecond_time.h"
 #include "operand.h"
+#include <atomic>
 #include <vector>
 #include <sstream>
 #include "stats.h"
@@ -30,15 +31,15 @@ enum InstructionType
    INST_SYNC,
    INST_SPAWN,
    INST_TLB_MISS,
+   INST_PAGEFAULT,
    INST_MEM_ACCESS, // Not a regular memory access.  These are added latencies and do not correspond to a particular instruction.  Dynamic Instruction
    INST_DELAY,
-   INST_PAGEFAULT,
    INST_UNKNOWN,
    MAX_INSTRUCTION_COUNT
 };
 
 __attribute__ ((unused)) static const char * INSTRUCTION_NAMES [] =
-{"generic","add","sub","mul","div","fadd","fsub","fmul","fdiv","jmp","branch", "dynamic_misc","recv","sync","spawn","tlb_miss","mem_access","delay","pagefault","unknown"};
+{"generic","add","sub","mul","div","fadd","fsub","fmul","fdiv","jmp","branch", "dynamic_misc","recv","sync","spawn","tlb_miss","page_fault","mem_access","delay","unknown"};
 
 class Instruction
 {
@@ -118,6 +119,27 @@ public:
    void setVaddress(IntPtr vaddr) { m_vaddr = vaddr; }
    IntPtr getVaddress() { return m_vaddr; }
 
+   // Dynamic ownership: if true, this Instruction and its MicroOps should be deleted
+   // when the last DynamicMicroOp is freed from the ROB.
+   // Used for ChampSim trace instructions which are created fresh per instance (not cached)
+   void setDynamic(bool dynamic) { m_dynamic = dynamic; }
+   bool isDynamic() const { return m_dynamic; }
+
+   // Reference counting for dynamic instructions (ChampSim traces)
+   // Multiple DynamicMicroOps from the same instruction can be in the ROB simultaneously.
+   // We only free the Instruction and its MicroOps when the last reference is released.
+   void addRef() { m_ref_count.fetch_add(1, std::memory_order_relaxed); }
+
+   // Returns true if this was the last reference and the instruction should be deleted
+   bool release() {
+      if (m_ref_count.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+         return true; // Caller should delete this instruction
+      }
+      return false;
+   }
+
+   int getRefCount() const { return m_ref_count.load(std::memory_order_relaxed); }
+
 private:
    typedef std::vector<unsigned int> StaticInstructionCosts;
    static StaticInstructionCosts m_instruction_costs;
@@ -131,6 +153,8 @@ private:
    IntPtr m_addr;
    UInt32 m_size;
    bool m_atomic;
+   bool m_dynamic;  // If true, Instruction and MicroOps will be deleted when last DynamicMicroOp is freed
+   std::atomic<int> m_ref_count{0};  // Reference count for dynamic instructions
 
    PICS_d *m_PICS_d;
    PICS_c *m_PICS_c;
@@ -251,6 +275,7 @@ public:
    bool isIfetch() const { return m_is_ifetch; }
 };
 
+// Page faults
 class PageFaultRoutineInstruction : public PseudoInstruction
 {
    bool m_is_fence;
