@@ -75,6 +75,8 @@ public:
    MimicOS *getMimicOS() { return m_mimicos; }
    MimicOS *getMimicOS_VM() { return m_mimicos_vm; }
 
+   bool isVirtualizedSystem() { return virtualized_system; }
+
    bool isRunning() { return m_running; }
    static void enablePerformanceModels();
    static void disablePerformanceModels();
@@ -112,6 +114,7 @@ private:
    MimicOS *m_mimicos;
    MimicOS *m_mimicos_vm;
 
+   bool virtualized_system;
    bool m_running;
    bool m_inst_mode_output;
 

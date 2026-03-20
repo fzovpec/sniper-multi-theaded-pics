@@ -17,19 +17,87 @@
 #include "rng.h"
 #include "routine_tracer.h"
 #include "sim_api.h"
-
+#include "mimicos.h"
 #include "stats.h"
 
 #include <unistd.h>
 #include <sys/syscall.h>
+#include <sched.h>
 
-#include <x86_decoder.h> // TODO remove when the decode function in microop perf model is adapted
+#include <x86_decoder.h>  // TODO remove when the decode function in microop perf model is adapted
+
+#include "debug_config.h"
+#include <sstream>
+#include <vector>
+
+// ---------------------------------------------------------------------------
+// Pin calling thread to a distinct host CPU chosen from the process's
+// available set (typically constrained by SLURM's cgroup).  Thread-safe:
+// uses a static atomic counter so each caller gets a different CPU.
+// ---------------------------------------------------------------------------
+static void pinTraceThreadToCPU(int thread_id)
+{
+   cpu_set_t available;
+   CPU_ZERO(&available);
+   if (sched_getaffinity(0, sizeof(available), &available) != 0)
+      return;  // cannot query -- leave scheduling to the OS
+
+   // Collect the list of CPUs we are allowed to use
+   std::vector<int> cpus;
+   for (int c = 0; c < CPU_SETSIZE; ++c)
+      if (CPU_ISSET(c, &available))
+         cpus.push_back(c);
+
+   if (cpus.empty())
+      return;
+
+   // Pick a CPU using the thread id (wraps if more threads than CPUs)
+   int target = cpus[thread_id % cpus.size()];
+
+   cpu_set_t mask;
+   CPU_ZERO(&mask);
+   CPU_SET(target, &mask);
+   sched_setaffinity(0, sizeof(mask), &mask);
+}
 
 int TraceThread::m_isa = 0;
 
 TraceThread::TraceThread(Thread *thread, SubsecondTime time_start, String tracefile, String responsefile, app_id_t app_id, bool cleanup)
-    : m__thread(NULL), m_thread(thread), m_time_start(time_start), m_trace(tracefile.c_str(), responsefile.c_str(), thread->getId()), m_trace_has_pa(false), m_address_randomization(Sim()->getCfg()->getBool("traceinput/address_randomization")), m_appid_from_coreid(Sim()->getCfg()->getString("scheduler/type") == "sequential" ? true : false), m_stop(false), m_bbv_base(0), m_bbv_count(0), m_bbv_last(0), m_bbv_end(false), m_output_leftover_size(0), m_tracefile(tracefile), m_responsefile(responsefile), m_app_id(app_id), m_blocked(false), m_cleanup(cleanup), m_started(false), m_stopped(false)
+   : m__thread(NULL)
+   , m_thread(thread)
+   , m_time_start(time_start)
+   , m_trace(tracefile.c_str(), responsefile.c_str(), thread->getId())
+   , m_kernel_trace(NULL)
+   , m_app_trace(NULL)
+   , m_current_sift_reader(NULL)
+   , m_trace_has_pa(false)
+   , m_address_randomization(Sim()->getCfg()->getBool("traceinput/address_randomization"))
+   , m_appid_from_coreid(Sim()->getCfg()->getString("scheduler/type") == "sequential" ? true : false)
+   , m_stop(false)
+   , m_bbv_base(0)
+   , m_bbv_count(0)
+   , m_bbv_last(0)
+   , m_bbv_end(false)
+   , m_output_leftover_size(0)
+   , m_tracefile(tracefile)
+   , m_responsefile(responsefile)
+   , m_app_id(app_id)
+   , m_blocked(false)
+   , m_cleanup(cleanup)
+   , m_started(false)
+   , m_stopped(false)
 {
+
+   bool userspace_mimicos_enabled = Sim()->getCfg()->getBool("general/enable_userspace_mimicos");
+
+   if (userspace_mimicos_enabled)
+   {
+      m_current_run_func = &TraceThread::m_run_func_with_userpace_mimicos;
+   }
+   else
+   {
+      m_current_run_func = &TraceThread::m_run_func_default;
+   }
 
    m_trace.setHandleInstructionCountFunc(TraceThread::__handleInstructionCountFunc, this);
    m_trace.setHandleCacheOnlyFunc(TraceThread::__handleCacheOnlyFunc, this);
@@ -60,6 +128,14 @@ TraceThread::TraceThread(Thread *thread, SubsecondTime time_start, String tracef
    }
 
    thread->setVa2paFunc(_va2pa, (UInt64)this);
+   stats.kernel_time = SubsecondTime::Zero();
+
+   // Guard against duplicate registration when a trace is restarted
+   StatsMetricBase *existing = Sim()->getStatsManager()->getMetricObject("trace_thread", m_app_id, "kernel_time");
+   if (existing == NULL)
+      registerStatsMetric("trace_thread", m_app_id, "kernel_time", &stats.kernel_time);
+   else
+      static_cast<StatsMetric<SubsecondTime>*>(existing)->metric = &stats.kernel_time;
 }
 
 TraceThread::~TraceThread()
@@ -727,11 +803,270 @@ void TraceThread::unblock()
    m_blocked = false;
 }
 
-void TraceThread::run()
+void TraceThread::m_run_func_with_userpace_mimicos()
 {
    // Set thread name for Sniper-in-Sniper simulations
    String threadName = String("trace-") + itostr(m_thread->getId());
    SimSetThreadName(threadName.c_str());
+
+   // Pin this trace thread to a distinct host CPU to avoid contention
+   pinTraceThreadToCPU(m_thread->getId());
+
+   Sim()->getThreadManager()->onThreadStart(m_thread->getId(), m_time_start);
+
+   // Open the trace (be sure to do this before potentially blocking on reschedule() as this causes deadlock)
+   m_trace.initStream();
+   m_trace_has_pa = m_trace.getTraceHasPhysicalAddresses();
+
+   if (m_thread->getCore() == NULL)
+   {
+      // We didn't get scheduled on startup, wait here
+      SubsecondTime time = SubsecondTime::Zero();
+      m_thread->reschedule(time, NULL);
+   }
+
+   Core *core = m_thread->getCore();
+   PerformanceModel *prfmdl = core->getPerformanceModel();
+
+   Sift::Instruction inst, next_inst;
+   Sift::Instruction inst_kernel, next_inst_kernel;
+   Sift::Instruction inst_app, next_inst_app;
+
+   // Initialise instruction state
+   to_be_replayed_inst.sinst = NULL;
+   to_be_replayed_next_inst.sinst = NULL;
+   inst_app.sinst = next_inst_app.sinst = NULL; // App reader state
+
+   bool app_initialized = false;
+
+   SubsecondTime kernel_start_time = SubsecondTime::Zero();
+   SubsecondTime kernel_end_time = SubsecondTime::Zero();
+   // By design, kernel SIFT reader runs first
+   bool have_inst = m_current_sift_reader->Read(inst_kernel);
+
+   kernel_start_time = prfmdl->getElapsedTime();
+
+   if (have_inst)
+   {
+      inst = inst_kernel;
+
+      int  executed_instructions = 0;
+      bool kernel_mode           __attribute__((unused)) = true;
+      bool switched              __attribute__((unused)) = false;
+
+      while (have_inst)
+      {
+         bool have_next = false;
+         switched = false;
+
+         if (getCurrentSiftReader() != getAppSiftReader())
+         {
+            // Currently reading from kernel SIFT reader
+
+            have_next = m_current_sift_reader->Read(next_inst_kernel);
+            if (!have_next)
+               break;   // EOF on kernel trace
+
+            next_inst = next_inst_kernel;
+
+            // NOTE: if we consumed a Context Switch command here, magic_server.cc
+            // may just have switched currentSiftReader: Kernel -> App.
+            if (getCurrentSiftReader() == getAppSiftReader())
+            {
+               switched = true;
+               // Finished processing kernel instructions; record end time
+               kernel_end_time = prfmdl->getElapsedTime();
+               stats.kernel_time += (kernel_end_time - kernel_start_time);
+               kernel_mode = false;
+
+               if (to_be_replayed_inst.sinst)
+               {
+                  // Returning from a page fault: restore exact app state
+                  assert(to_be_replayed_inst.sinst == inst_app.sinst &&
+                         to_be_replayed_next_inst.sinst == next_inst_app.sinst);
+
+                  inst      = to_be_replayed_inst;
+                  next_inst = to_be_replayed_next_inst;
+                  to_be_replayed_inst.sinst = to_be_replayed_next_inst.sinst = NULL;
+                  have_next = true; // next_inst is valid by construction
+               }
+               else
+               {
+                  // First time or normal resume on app reader
+                  if (!app_initialized)
+                  {
+                     // First time: read both inst_app and next_inst_app
+                     if (!m_current_sift_reader->Read(inst_app))
+                        break;
+                     if (!m_current_sift_reader->Read(next_inst_app))
+                        break;
+                     app_initialized = true;
+                  }
+                  else
+                  {
+                     // Continue: shift lookahead then read a new next_inst_app
+                     inst_app = next_inst_app;
+                     if (!m_current_sift_reader->Read(next_inst_app))
+                        break;
+                  }
+
+                  inst      = inst_app;
+                  next_inst = next_inst_app;
+                  have_next = true;
+               }
+            }
+         }
+         else
+         {
+            // Currently reading from app SIFT reader
+
+            // We assume app_initialized is true when we get here
+            inst_app = next_inst_app;
+            if (!m_current_sift_reader->Read(next_inst_app))
+               break;   // EOF on app trace
+
+            next_inst = next_inst_app;
+            have_next = true;
+         }
+
+         if (!m_started)
+         {
+            // Received first instructions, let TraceManager know our SIFT connection is up and running
+            // Only enable once we have received two instructions, otherwise, we could deadlock
+            Sim()->getTraceManager()->signalStarted();
+            m_started = true;
+         }
+
+         // We may have been blocked in a system call; starting to execute again means we continue
+         if (m_blocked)
+         {
+            unblock();
+         }
+
+         core = m_thread->getCore();
+         LOG_ASSERT_ERROR(core, "We cannot execute instructions while not on a core");
+         prfmdl = core->getPerformanceModel();
+
+         bool   do_icache_warmup = false;
+         UInt64 icache_warmup_addr = 0, icache_warmup_size = 0;
+
+         // Reconstruct and count basic blocks
+
+         if (m_bbv_end || m_bbv_last != inst.sinst->addr)
+         {
+            // We're the start of a new basic block
+            core->countInstructions(m_bbv_base, m_bbv_count);
+            // In cache-only mode, we'll want to do I-cache warmup
+            if (m_bbv_base)
+            {
+               do_icache_warmup = true;
+               icache_warmup_addr = m_bbv_base;
+               icache_warmup_size = m_bbv_last - m_bbv_base;
+            }
+            // Set up new basic block info
+            m_bbv_base = inst.sinst->addr;
+            m_bbv_count = 0;
+         }
+         m_bbv_count++;
+         m_bbv_last = inst.sinst->addr + inst.sinst->size;
+         // Force BBV end on non-taken branches
+         m_bbv_end = inst.is_branch;
+
+         switch(Sim()->getInstrumentationMode())
+         {
+            case InstMode::FAST_FORWARD:
+               break;
+
+            case InstMode::CACHE_ONLY:
+               handleInstructionWarmup(inst, next_inst, core, do_icache_warmup, icache_warmup_addr, icache_warmup_size);
+               break;
+
+            case InstMode::DETAILED:
+               handleInstructionDetailed(inst, next_inst, prfmdl);
+               break;
+
+            default:
+               LOG_PRINT_ERROR("Unknown instrumentation mode");
+         }
+
+         // We may have been rescheduled to a different core
+         // by prfmdl->iterate (in handleInstructionDetailed),
+         // or core->countInstructions (when using a fast-forward performance model)
+         {
+            SubsecondTime time = prfmdl->getElapsedTime();
+            if (m_thread->reschedule(time, core))
+            {
+               core = m_thread->getCore();
+               prfmdl = core->getPerformanceModel();
+            }
+         }
+
+         if (m_stop)
+            break;
+
+         auto* mimic_os = Sim()->getMimicOS();
+         core_id_t pf_core_id = core->getId();
+
+         if (mimic_os->getIsPageFault(pf_core_id))
+         {
+            kernel_start_time = prfmdl->getElapsedTime();
+            // Page fault must occur only in user space
+            assert(getCurrentSiftReader() == getAppSiftReader());
+
+            // Save app instruction pair to replay after kernel handles the fault
+            to_be_replayed_inst      = inst_app;
+            to_be_replayed_next_inst = next_inst_app;
+
+            int num_requested_frames = mimic_os->getNumRequestedFrames(pf_core_id);
+
+            mimic_os->buildMessageWithArgs("page_fault",
+                                           mimic_os->getVaTriggeredPageFault(pf_core_id),
+                                           num_requested_frames);
+
+            // Handle PF on user-space MimicOS (kernel) side
+            setCurrentSiftReader(getKernelSiftReader());
+
+            // Unlock Sift::Writer on MimicOS (kernel) side
+            getCurrentSiftReader()->sendResponseAfterContextSwitch();
+
+            // First instruction after switching back to kernel
+            bool have_next_pf = m_current_sift_reader->Read(next_inst_kernel);
+            if (!have_next_pf)
+               break;   // EOF on kernel after PF handling
+
+            next_inst = next_inst_kernel;
+            have_next = have_next_pf;
+
+            kernel_mode = true;
+            mimic_os->resetPageFaultState(pf_core_id);
+         }
+
+         // Save current "next_inst" as the next "inst"
+         inst      = next_inst;
+         have_inst = have_next;
+
+         executed_instructions++;
+      }
+   }
+
+   printf("[TRACE:%u] -- %s --\n", m_thread->getId(), m_stop ? "STOP" : "DONE");
+
+   SubsecondTime time_end = prfmdl->getElapsedTime();
+
+   Sim()->getThreadManager()->onThreadExit(m_thread->getId());
+   Sim()->getTraceManager()->signalDone(this, time_end, m_stop /*aborted*/);
+}
+
+
+
+void TraceThread::m_run_func_default()
+{
+   // Set thread name for Sniper-in-Sniper simulations
+   String threadName = String("trace-") + itostr(m_thread->getId());
+   SimSetThreadName(threadName.c_str());
+
+   // Pin this trace thread to a distinct host CPU to avoid contention
+   pinTraceThreadToCPU(m_thread->getId());
 
    Sim()->getThreadManager()->onThreadStart(m_thread->getId(), m_time_start);
 
@@ -753,7 +1088,7 @@ void TraceThread::run()
 
    bool have_first = m_trace.Read(inst);
 
-   while (have_first && m_trace.Read(next_inst))
+   while(have_first && m_trace.Read(next_inst))
    {
       if (!m_started)
       {
@@ -767,13 +1102,14 @@ void TraceThread::run()
          unblock();
       }
 
-      core = m_thread->getCore();
-      prfmdl = core->getPerformanceModel();
+         core = m_thread->getCore();
+         LOG_ASSERT_ERROR(core, "We cannot execute instructions while not on a core");
+         prfmdl = core->getPerformanceModel();
 
-      bool do_icache_warmup = false;
-      UInt64 icache_warmup_addr = 0, icache_warmup_size = 0;
+         bool   do_icache_warmup = false;
+         UInt64 icache_warmup_addr = 0, icache_warmup_size = 0;
 
-      // Reconstruct and count basic blocks
+         // Reconstruct and count basic blocks
 
       if (m_bbv_end || m_bbv_last != inst.sinst->addr)
       {
@@ -795,22 +1131,24 @@ void TraceThread::run()
       // Force BBV end on non-taken branches
       m_bbv_end = inst.is_branch;
 
-      switch (Sim()->getInstrumentationMode())
+
+      switch(Sim()->getInstrumentationMode())
       {
-      case InstMode::FAST_FORWARD:
-         break;
+         case InstMode::FAST_FORWARD:
+            break;
 
-      case InstMode::CACHE_ONLY:
-         handleInstructionWarmup(inst, next_inst, core, do_icache_warmup, icache_warmup_addr, icache_warmup_size);
-         break;
+         case InstMode::CACHE_ONLY:
+            handleInstructionWarmup(inst, next_inst, core, do_icache_warmup, icache_warmup_addr, icache_warmup_size);
+            break;
 
-      case InstMode::DETAILED:
-         handleInstructionDetailed(inst, next_inst, prfmdl);
-         break;
+         case InstMode::DETAILED:
+            handleInstructionDetailed(inst, next_inst, prfmdl);
+            break;
 
-      default:
-         LOG_PRINT_ERROR("Unknown instrumentation mode");
+         default:
+            LOG_PRINT_ERROR("Unknown instrumentation mode");
       }
+
 
       // We may have been rescheduled to a different core
       // by prfmdl->iterate (in handleInstructionDetailed),
@@ -821,6 +1159,7 @@ void TraceThread::run()
          core = m_thread->getCore();
          prfmdl = core->getPerformanceModel();
       }
+
 
       if (m_stop)
          break;

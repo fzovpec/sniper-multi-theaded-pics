@@ -2,10 +2,10 @@
 #define __TRACE_MANAGER_H
 
 #include "fixed_types.h"
-#include "sem.h"
+#include "semaphore.h"
 #include "core.h" // for lock_signal_t and mem_op_t
 #include "_thread.h"
-
+#include "sift_reader.h"
 #include <vector>
 
 class TraceThread;
@@ -19,9 +19,8 @@ class TraceManager
             void run();
             _Thread *m_thread;
             TraceManager *m_manager;
-	    UInt32 m_timeout;
          public:
-	    Monitor(TraceManager *manager, UInt32 timeout = 60);
+            Monitor(TraceManager *manager);
             ~Monitor();
             void spawn();
       };
@@ -54,10 +53,14 @@ class TraceManager
       String m_trace_prefix;
       Lock m_lock;
 
+      Sift::Reader *m_kernel_trace_reader;
+
       String getFifoName(app_id_t app_id, UInt64 thread_num, bool response, bool create);
       thread_id_t newThread(app_id_t app_id, bool first, bool init_fifo, bool spawn, SubsecondTime time, thread_id_t creator_thread_id);
 
       friend class Monitor;
+
+      void setTraceReaderHandlers(Sift::Reader* reader, TraceThread* mimicos_trace_thread);
 
    public:
       TraceManager();
@@ -72,11 +75,17 @@ class TraceManager
       void setupTraceFiles(int index);
       thread_id_t createThread(app_id_t app_id, SubsecondTime time, thread_id_t creator_thread_id);
       app_id_t createApplication(SubsecondTime time, thread_id_t creator_thread_id);
+      app_id_t createTraceBasedApplication(SubsecondTime time, char* trace, thread_id_t creator_thread_id);
       void signalStarted();
       void signalDone(TraceThread *thread, SubsecondTime time, bool aborted);
       void endApplication(TraceThread *thread, SubsecondTime time);
-      void endFrontEnd(); //Ask all trace_threads to send signal to front-end to shutdown
       void accessMemory(int core_id, Core::lock_signal_t lock_signal, Core::mem_op_t mem_op_type, IntPtr d_addr, char* data_buffer, UInt32 data_size);
+      void endFrontEnd(); //Ask all trace_threads to send signal to front-end to shutdown
+
+      TraceThread *getTraceThread(app_id_t app_id, thread_id_t th);
+
+      Sift::Reader *getKernelTraceReader() const { return m_kernel_trace_reader; }
+      void setKernelTraceReader(Sift::Reader *reader) { m_kernel_trace_reader = reader; }
 
       UInt64 getProgressExpect();
       UInt64 getProgressValue();

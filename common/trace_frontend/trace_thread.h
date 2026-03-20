@@ -7,7 +7,7 @@
 #include "core.h"
 #include "sift_reader.h"
 #include "operand.h"
-#include "sem.h"
+#include "semaphore.h"
 
 #include <decoder.h>
 
@@ -49,7 +49,14 @@ class TraceThread : public Runnable
       _Thread *m__thread;
       Thread *m_thread;
       SubsecondTime m_time_start;
+
       Sift::Reader m_trace;
+      Sift::Reader *m_kernel_trace;          // SIFT reader for the kernel trace, if any
+      Sift::Reader *m_app_trace;             // SIFT reader for the application trace, if any
+      Sift::Reader *m_current_sift_reader;   // Currently active SIFT reader
+
+      bool is_in_kernel_mode;
+
       bool m_trace_has_pa;
       bool m_address_randomization;
       bool m_appid_from_coreid;
@@ -57,6 +64,7 @@ class TraceThread : public Runnable
       bool m_stop;
       std::unordered_map<IntPtr, Instruction *> m_icache;
       std::unordered_map<IntPtr, const dl::DecodedInst *> m_decoder_cache;
+
       UInt64 m_bbv_base;
       UInt64 m_bbv_count;
       UInt64 m_bbv_last;
@@ -66,13 +74,70 @@ class TraceThread : public Runnable
       uint16_t m_output_leftover_size;
       String m_tracefile;
       String m_responsefile;
+
+      String m_tracefile_kernel;
+      String m_responsefile_kernel;
+
       app_id_t m_app_id;
       bool m_blocked;
       bool m_cleanup;
       bool m_started;
 
-      void run();
-      static Sift::Mode __handleInstructionCountFunc(void* arg, uint32_t icount)
+      int fd_read;
+      int fd_write;
+
+      // INVARIANT: to_be_replayed_inst.sinst != NULL iff thread->getCore()->getMemoryManager()->is_page_fault = True
+      Sift::Instruction  to_be_replayed_inst;      // This is the instruction that is currently being replayed, if any
+      Sift::Instruction  to_be_replayed_next_inst;
+
+      struct statistics
+      {
+         SubsecondTime kernel_time;
+      } stats;
+      // Make run() a function pointer which is initialized in the constructor
+      typedef void (TraceThread::*RunFunc)();
+      RunFunc m_current_run_func;
+
+      void run(){
+         (this->*m_current_run_func)();
+      }
+
+      void m_run_func_default();
+      void m_run_func_with_userpace_mimicos();
+
+      Sift::Mode handleInstructionCountFunc(uint32_t icount);
+      void handleCacheOnlyFunc(uint8_t icount, Sift::CacheOnlyType type, uint64_t eip, uint64_t address);
+      void handleOutputFunc(uint8_t fd, const uint8_t *data, uint32_t size);
+      uint64_t handleSyscallFunc(uint16_t syscall_number, const uint8_t *data, uint32_t size);
+      int32_t handleNewThreadFunc();
+      int32_t handleForkFunc();
+      int32_t handleJoinFunc(int32_t thread);
+      uint64_t handleMagicFunc(uint64_t a, uint64_t b, uint64_t c);
+      bool handleEmuFunc(Sift::EmuType type, Sift::EmuRequest &req, Sift::EmuReply &res);
+      void handleRoutineChangeFunc(Sift::RoutineOpType event, uint64_t eip, uint64_t esp, uint64_t callEip);
+      void handleRoutineAnnounceFunc(uint64_t eip, const char *name, const char *imgname, uint64_t offset, uint32_t line, uint32_t column, const char *filename);
+
+
+
+      Instruction* decode(Sift::Instruction &inst);
+      void handleInstructionWarmup(Sift::Instruction &inst, Sift::Instruction &next_inst, Core *core, bool do_icache_warmup, UInt64 icache_warmup_addr, UInt64 icache_warmup_size);
+      void handleInstructionDetailed(Sift::Instruction &inst, Sift::Instruction &next_inst, PerformanceModel *prfmdl);
+      void addDetailedMemoryInfo(DynamicInstruction *dynins, Sift::Instruction &inst, const dl::DecodedInst &decoded_inst, uint32_t mem_idx, Operand::Direction op_type, bool is_pretetch, PerformanceModel *prfmdl);
+      void unblock();
+
+      SubsecondTime getCurrentTime() const;
+
+      dl::DecoderFactory *m_factory;  // we need a factory here to be able to create instructions of any kind
+      const dl::DecodedInst* staticDecode(Sift::Instruction &inst);
+
+      long long *m_papi_counters;
+      bool m_virtuos_app;
+
+      Lock m_lock;
+
+   public:
+
+         static Sift::Mode __handleInstructionCountFunc(void* arg, uint32_t icount)
       { return ((TraceThread*)arg)->handleInstructionCountFunc(icount); }
       static void __handleCacheOnlyFunc(void* arg, uint8_t icount, Sift::CacheOnlyType type, uint64_t eip, uint64_t address)
       { ((TraceThread*)arg)->handleCacheOnlyFunc(icount, type, eip, address); }
@@ -95,17 +160,6 @@ class TraceThread : public Runnable
       static int32_t __handleForkFunc(void* arg)
       { return ((TraceThread*)arg)->handleForkFunc();}
 
-      Sift::Mode handleInstructionCountFunc(uint32_t icount);
-      void handleCacheOnlyFunc(uint8_t icount, Sift::CacheOnlyType type, uint64_t eip, uint64_t address);
-      void handleOutputFunc(uint8_t fd, const uint8_t *data, uint32_t size);
-      uint64_t handleSyscallFunc(uint16_t syscall_number, const uint8_t *data, uint32_t size);
-      int32_t handleNewThreadFunc();
-      int32_t handleForkFunc();
-      int32_t handleJoinFunc(int32_t thread);
-      uint64_t handleMagicFunc(uint64_t a, uint64_t b, uint64_t c);
-      bool handleEmuFunc(Sift::EmuType type, Sift::EmuRequest &req, Sift::EmuReply &res);
-      void handleRoutineChangeFunc(Sift::RoutineOpType event, uint64_t eip, uint64_t esp, uint64_t callEip);
-      void handleRoutineAnnounceFunc(uint64_t eip, const char *name, const char *imgname, uint64_t offset, uint32_t line, uint32_t column, const char *filename);
 
       Instruction* decode(Sift::Instruction &inst);
       void handleInstructionWarmup(Sift::Instruction &inst, Sift::Instruction &next_inst, Core *core, bool do_icache_warmup, UInt64 icache_warmup_addr, UInt64 icache_warmup_size);
@@ -132,11 +186,25 @@ class TraceThread : public Runnable
 
       void spawn();
       void stop() { m_stop = true; }
-      void frontEndStop(); //Ask all trace_threads to send signal to front-end to shutdown
       UInt64 getProgressExpect();
       UInt64 getProgressValue();
+      void frontEndStop(); //Ask all trace_threads to send signal to front-end to shutdown
+
       Thread* getThread() const { return m_thread; }
+      bool getVirtuosApp() { return m_virtuos_app; }
+
       void handleAccessMemory(Core::lock_signal_t lock_signal, Core::mem_op_t mem_op_type, IntPtr d_addr, char* data_buffer, UInt32 data_size);
+
+      Sift::Reader* getSiftReader() { return &m_trace; }
+
+      Sift::Reader* getKernelSiftReader() { return m_kernel_trace; }
+      void setKernelSIFTRreader(Sift::Reader *reader) { m_kernel_trace = reader; }
+
+      Sift::Reader* getAppSiftReader() { return m_app_trace; }
+      void setAppSiftReader(Sift::Reader *reader) { m_app_trace = reader; }
+
+      Sift::Reader* getCurrentSiftReader() { return m_current_sift_reader; }
+      void setCurrentSiftReader(Sift::Reader *reader) { m_current_sift_reader = reader; }
 };
 
 #endif // __TRACE_THREAD_H

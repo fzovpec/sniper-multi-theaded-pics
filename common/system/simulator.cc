@@ -125,6 +125,7 @@ Simulator::Simulator()
    , m_memory_tracker(NULL)
    , m_mimicos(NULL)
    , m_mimicos_vm(NULL)
+   , virtualized_system(false)
    , m_running(false)
    , m_inst_mode_output(true)
 {
@@ -158,7 +159,7 @@ void Simulator::start()
    // memory allocation, and page fault handling
    m_mimicos = new MimicOS(false); // Host OS
 
-   bool virtualized_system = Sim()->getCfg()->getBool("general/enable_virtualized_system");
+   virtualized_system = Sim()->getCfg()->getBool("general/virtualized_environment");
    if (virtualized_system) {
       m_mimicos_vm = new MimicOS(true); // Guest OS
    }

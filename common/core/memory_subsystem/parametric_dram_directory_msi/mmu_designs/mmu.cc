@@ -1079,10 +1079,10 @@ namespace ParametricDramDirectoryMSI
         translation_stats.total_translation_latency += translation_latency;
         
         // ====================================================================
-        // Update MimicOS Per-Core Stats (for adaptive policies like MPLRU)
+        // Update MimicOS Per-Core Stats (for adaptive replacement policies)
         // ====================================================================
         // Update centralized stats in MimicOS that can be accessed by any component.
-        // The MPLRU controller pulls from these stats in processEpoch().
+        // The adaptive controller pulls from these stats in processEpoch().
         if (count)
         {
             MimicOS* mimicos = Sim()->getMimicOS();
@@ -1095,7 +1095,7 @@ namespace ParametricDramDirectoryMSI
                                                 total_walk_latency);
             }
             
-            // Note: MPLRU epoch processing is triggered from memory_manager
+            // Note: Epoch processing is triggered from memory_manager
             // after data accesses, where the controller checks timing internally
         }
         
