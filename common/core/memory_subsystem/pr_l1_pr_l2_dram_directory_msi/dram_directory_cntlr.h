@@ -56,8 +56,8 @@ namespace PrL1PrL2DramDirectoryMSI
          void processInvRepFromL2Cache(core_id_t sender, ShmemMsg* shmem_msg);
          void processFlushRepFromL2Cache(core_id_t sender, ShmemMsg* shmem_msg);
          void processWbRepFromL2Cache(core_id_t sender, ShmemMsg* shmem_msg);
-         void sendDataToNUCA(IntPtr address, core_id_t requester, Byte* data_buf, SubsecondTime now, bool count);
-         void sendDataToDram(IntPtr address, core_id_t requester, Byte* data_buf, SubsecondTime now);
+         void sendDataToNUCA(IntPtr address, core_id_t requester, Byte* data_buf, SubsecondTime now, bool count, CacheBlockInfo::block_type_t block_type);
+         void sendDataToDram(IntPtr address, core_id_t requester, Byte* data_buf, SubsecondTime now, CacheBlockInfo::block_type_t block_type);
 
          void updateShmemPerf(ShmemReq *shmem_req, ShmemPerf::shmem_times_type_t reason = ShmemPerf::UNKNOWN)
          {

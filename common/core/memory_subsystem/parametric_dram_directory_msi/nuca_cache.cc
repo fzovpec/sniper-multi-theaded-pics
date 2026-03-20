@@ -54,7 +54,7 @@ NucaCache::~NucaCache()
 }
 
 boost::tuple<SubsecondTime, HitWhere::where_t>
-NucaCache::read(IntPtr address, Byte* data_buf, SubsecondTime now, ShmemPerf *perf, bool count)
+NucaCache::read(IntPtr address, Byte* data_buf, SubsecondTime now, ShmemPerf *perf, bool count, bool is_metadata)
 {
    HitWhere::where_t hit_where = HitWhere::MISS;
    perf->updateTime(now);
@@ -80,7 +80,7 @@ NucaCache::read(IntPtr address, Byte* data_buf, SubsecondTime now, ShmemPerf *pe
 }
 
 boost::tuple<SubsecondTime, HitWhere::where_t>
-NucaCache::write(IntPtr address, Byte* data_buf, bool& eviction, IntPtr& evict_address, Byte* evict_buf, SubsecondTime now, bool count)
+NucaCache::write(IntPtr address, Byte* data_buf, bool& eviction, IntPtr& evict_address, Byte* evict_buf, SubsecondTime now, bool count, bool is_metadata)
 {
    HitWhere::where_t hit_where = HitWhere::MISS;
 

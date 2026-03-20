@@ -14,7 +14,8 @@ namespace PrL1PrL2DramDirectoryMSI
       m_address(INVALID_ADDRESS),
       m_data_buf(NULL),
       m_data_length(0),
-      m_perf(perf)
+      m_perf(perf),
+      m_block_type(CacheBlockInfo::block_type_t::DATA)
    {}
 
    ShmemMsg::ShmemMsg(msg_t msg_type,
@@ -24,7 +25,7 @@ namespace PrL1PrL2DramDirectoryMSI
          IntPtr address,
          Byte* data_buf,
          UInt32 data_length,
-         ShmemPerf* perf) :
+         ShmemPerf* perf,CacheBlockInfo::block_type_t block_type) :
       m_msg_type(msg_type),
       m_sender_mem_component(sender_mem_component),
       m_receiver_mem_component(receiver_mem_component),
@@ -33,7 +34,8 @@ namespace PrL1PrL2DramDirectoryMSI
       m_address(address),
       m_data_buf(data_buf),
       m_data_length(data_length),
-      m_perf(perf)
+      m_perf(perf),
+      m_block_type(block_type)
    {}
 
    ShmemMsg::ShmemMsg(ShmemMsg* shmem_msg) :
@@ -44,7 +46,8 @@ namespace PrL1PrL2DramDirectoryMSI
       m_address(shmem_msg->getAddress()),
       m_data_buf(shmem_msg->getDataBuf()),
       m_data_length(shmem_msg->getDataLength()),
-      m_perf(shmem_msg->getPerf())
+      m_perf(shmem_msg->getPerf()),
+      m_block_type(shmem_msg->getBlockType())
    {}
 
    ShmemMsg::~ShmemMsg()

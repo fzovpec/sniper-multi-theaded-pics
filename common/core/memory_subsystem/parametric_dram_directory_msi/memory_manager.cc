@@ -231,7 +231,8 @@ MemoryManager::MemoryManager(Core* core,
 
       m_dram_cntlr = new PrL1PrL2DramDirectoryMSI::DramCntlr(this,
             getShmemPerfModel(),
-            getCacheBlockSize());
+            getCacheBlockSize(),
+            m_dram_controller_home_lookup);
       Sim()->getStatsManager()->logTopology("dram-cntlr", core->getId(), core->getId());
 
       if (Sim()->getCfg()->getBoolArray("perf_model/dram/cache/enabled", core->getId()))

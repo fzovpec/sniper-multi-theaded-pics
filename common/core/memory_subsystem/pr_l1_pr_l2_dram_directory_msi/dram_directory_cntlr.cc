@@ -294,7 +294,7 @@ DramDirectoryCntlr::processDirectoryEntryAllocationReq(ShmemReq* shmem_req)
    // We get the entry with the lowest number of sharers
    DirectoryEntry* directory_entry = m_dram_directory_cache->replaceDirectoryEntry(replaced_address, address, true);
 
-   ShmemMsg nullify_msg(ShmemMsg::NULLIFY_REQ, MemComponent::TAG_DIR, MemComponent::TAG_DIR, requester, replaced_address, NULL, 0, &m_dummy_shmem_perf);
+   ShmemMsg nullify_msg(ShmemMsg::NULLIFY_REQ, MemComponent::TAG_DIR, MemComponent::TAG_DIR, requester, replaced_address, NULL, 0, &m_dummy_shmem_perf, CacheBlockInfo::block_type_t::DATA);
 
    ShmemReq* nullify_req = new ShmemReq(&nullify_msg, msg_time);
 
@@ -337,7 +337,7 @@ DramDirectoryCntlr::processNullifyReq(ShmemReq* shmem_req)
                NULL, 0,
                HitWhere::UNKNOWN,
                &m_dummy_shmem_perf,
-               ShmemPerfModel::_SIM_THREAD);
+               ShmemPerfModel::_SIM_THREAD, shmem_req->getBlockType());
          break;
 
       case DirectoryState::SHARED:
@@ -348,6 +348,7 @@ DramDirectoryCntlr::processNullifyReq(ShmemReq* shmem_req)
             {
                // Broadcast Invalidation Request to all cores
                // (irrespective of whether they are sharers or not)
+               
                getMemoryManager()->broadcastMsg(ShmemMsg::INV_REQ,
                      MemComponent::TAG_DIR, MemComponent::L2_CACHE,
                      requester /* requester */,
@@ -369,7 +370,7 @@ DramDirectoryCntlr::processNullifyReq(ShmemReq* shmem_req)
                         NULL, 0,
                         HitWhere::UNKNOWN,
                         &m_dummy_shmem_perf,
-                        ShmemPerfModel::_SIM_THREAD);
+                        ShmemPerfModel::_SIM_THREAD,shmem_req->getBlockType());
                }
             }
          }
@@ -426,7 +427,7 @@ DramDirectoryCntlr::processExReqFromL2Cache(ShmemReq* shmem_req, Byte* cached_da
                directory_entry->getOwner() /* receiver */,
                address,
                NULL, 0,
-               HitWhere::UNKNOWN, shmem_req->getShmemMsg()->getPerf(), ShmemPerfModel::_SIM_THREAD);
+               HitWhere::UNKNOWN, shmem_req->getShmemMsg()->getPerf(), ShmemPerfModel::_SIM_THREAD,shmem_req->getBlockType());
          break;
       }
 
@@ -460,7 +461,7 @@ DramDirectoryCntlr::processExReqFromL2Cache(ShmemReq* shmem_req, Byte* cached_da
                               NULL, 0,
                               HitWhere::UNKNOWN,
                               i == 0 ? shmem_req->getShmemMsg()->getPerf() : &m_dummy_shmem_perf,
-                              ShmemPerfModel::_SIM_THREAD);
+                              ShmemPerfModel::_SIM_THREAD,shmem_req->getBlockType());
             }
          }
          break;
@@ -518,7 +519,7 @@ DramDirectoryCntlr::processShReqFromL2Cache(ShmemReq* shmem_req, Byte* cached_da
                directory_entry->getOwner() /* receiver */,
                address,
                NULL, 0,
-               HitWhere::UNKNOWN, shmem_req->getShmemMsg()->getPerf(), ShmemPerfModel::_SIM_THREAD);
+               HitWhere::UNKNOWN, shmem_req->getShmemMsg()->getPerf(), ShmemPerfModel::_SIM_THREAD,shmem_req->getBlockType());
          break;
       }
 
@@ -532,7 +533,7 @@ DramDirectoryCntlr::processShReqFromL2Cache(ShmemReq* shmem_req, Byte* cached_da
                directory_entry->getOwner() /* receiver */,
                address,
                NULL, 0,
-               HitWhere::UNKNOWN, shmem_req->getShmemMsg()->getPerf(), ShmemPerfModel::_SIM_THREAD);
+               HitWhere::UNKNOWN, shmem_req->getShmemMsg()->getPerf(), ShmemPerfModel::_SIM_THREAD,shmem_req->getBlockType());
          break;
       }
 
@@ -563,7 +564,7 @@ DramDirectoryCntlr::processShReqFromL2Cache(ShmemReq* shmem_req, Byte* cached_da
                      sharer_id /* receiver */,
                      address,
                      NULL, 0,
-                     HitWhere::UNKNOWN, shmem_req->getShmemMsg()->getPerf(), ShmemPerfModel::_SIM_THREAD);
+                     HitWhere::UNKNOWN, shmem_req->getShmemMsg()->getPerf(), ShmemPerfModel::_SIM_THREAD,shmem_req->getBlockType());
             }
             else
             {
@@ -628,7 +629,7 @@ DramDirectoryCntlr::retrieveDataAndSendToL2Cache(ShmemMsg::msg_t reply_msg_type,
             cached_data_buf, getCacheBlockSize(),
             HitWhere::CACHE_REMOTE /* cached_data_buf was filled by a WB_REQ or FLUSH_REQ */,
             orig_shmem_msg->getPerf(),
-            ShmemPerfModel::_SIM_THREAD);
+            ShmemPerfModel::_SIM_THREAD,orig_shmem_msg->getBlockType());
 
       // Process Next Request
       processNextReqFromL2Cache(address);
@@ -640,7 +641,7 @@ DramDirectoryCntlr::retrieveDataAndSendToL2Cache(ShmemMsg::msg_t reply_msg_type,
          SubsecondTime nuca_latency;
          HitWhere::where_t hit_where;
          Byte nuca_data_buf[getCacheBlockSize()];
-         boost::tie(nuca_latency, hit_where) = m_nuca_cache->read(address, nuca_data_buf, getShmemPerfModel()->getElapsedTime(ShmemPerfModel::_SIM_THREAD), orig_shmem_msg->getPerf(), true);
+         boost::tie(nuca_latency, hit_where) = m_nuca_cache->read(address, nuca_data_buf, getShmemPerfModel()->getElapsedTime(ShmemPerfModel::_SIM_THREAD), orig_shmem_msg->getPerf(), true,orig_shmem_msg->getBlockType());
 
          getShmemPerfModel()->incrElapsedTime(nuca_latency, ShmemPerfModel::_SIM_THREAD);
 
@@ -654,7 +655,7 @@ DramDirectoryCntlr::retrieveDataAndSendToL2Cache(ShmemMsg::msg_t reply_msg_type,
                   nuca_data_buf, getCacheBlockSize(),
                   HitWhere::NUCA_CACHE,
                   orig_shmem_msg->getPerf(),
-                  ShmemPerfModel::_SIM_THREAD);
+                  ShmemPerfModel::_SIM_THREAD,orig_shmem_msg->getBlockType());
 
             // Process Next Request
             processNextReqFromL2Cache(address);
@@ -683,7 +684,7 @@ DramDirectoryCntlr::retrieveDataAndSendToL2Cache(ShmemMsg::msg_t reply_msg_type,
             forwarder /* receiver */,
             address,
             NULL, 0,
-            HitWhere::UNKNOWN, shmem_req->getShmemMsg()->getPerf(), ShmemPerfModel::_SIM_THREAD);
+            HitWhere::UNKNOWN, shmem_req->getShmemMsg()->getPerf(), ShmemPerfModel::_SIM_THREAD,shmem_req->getBlockType());
          return;
       }
 
@@ -710,7 +711,7 @@ DramDirectoryCntlr::retrieveDataAndSendToL2Cache(ShmemMsg::msg_t reply_msg_type,
             NULL, 0,
             HitWhere::UNKNOWN,
             orig_shmem_msg->getPerf(),
-            ShmemPerfModel::_SIM_THREAD);
+            ShmemPerfModel::_SIM_THREAD,orig_shmem_msg->getBlockType());
    }
    MYLOG("End @ %lx", address);
 }
@@ -782,10 +783,10 @@ DramDirectoryCntlr::processDRAMReply(core_id_t sender, ShmemMsg* shmem_msg)
          shmem_msg->getDataBuf(), getCacheBlockSize(),
          hit_where,
          shmem_req->getShmemMsg()->getPerf(),
-         ShmemPerfModel::_SIM_THREAD);
+         ShmemPerfModel::_SIM_THREAD,shmem_req->getBlockType());
 
    // Keep a copy in NUCA
-   sendDataToNUCA(address, shmem_req->getShmemMsg()->getRequester(), shmem_msg->getDataBuf(), getShmemPerfModel()->getElapsedTime(ShmemPerfModel::_SIM_THREAD), false);
+   sendDataToNUCA(address, shmem_req->getShmemMsg()->getRequester(), shmem_msg->getDataBuf(), getShmemPerfModel()->getElapsedTime(ShmemPerfModel::_SIM_THREAD), false,shmem_msg->getBlockType());
 
    // Process Next Request
    processNextReqFromL2Cache(address);
@@ -948,7 +949,7 @@ DramDirectoryCntlr::processUpgradeReqFromL2Cache(ShmemReq* shmem_req, Byte* cach
                         requester /* receiver */,
                         address,
                         NULL, 0,
-                        HitWhere::UNKNOWN, shmem_msg->getPerf(), ShmemPerfModel::_SIM_THREAD);
+                        HitWhere::UNKNOWN, shmem_msg->getPerf(), ShmemPerfModel::_SIM_THREAD,shmem_msg->getBlockType());
 
             directory_block_info->setDState(DirectoryState::MODIFIED);
 
@@ -964,7 +965,7 @@ DramDirectoryCntlr::processUpgradeReqFromL2Cache(ShmemReq* shmem_req, Byte* cach
                   directory_entry->getOwner() /* receiver */,
                   address,
                   NULL, 0,
-                  HitWhere::UNKNOWN, shmem_msg->getPerf(), ShmemPerfModel::_SIM_THREAD);
+                  HitWhere::UNKNOWN, shmem_msg->getPerf(), ShmemPerfModel::_SIM_THREAD,shmem_msg->getBlockType());
          }
 
          break;
@@ -984,7 +985,7 @@ DramDirectoryCntlr::processUpgradeReqFromL2Cache(ShmemReq* shmem_req, Byte* cach
                   requester /* receiver */,
                   address,
                   NULL, 0,
-                  HitWhere::UNKNOWN, shmem_msg->getPerf(), ShmemPerfModel::_SIM_THREAD);
+                  HitWhere::UNKNOWN, shmem_msg->getPerf(), ShmemPerfModel::_SIM_THREAD,shmem_msg->getBlockType());
 
             processNextReqFromL2Cache(address);
          }
@@ -1020,6 +1021,9 @@ DramDirectoryCntlr::processUpgradeReqFromL2Cache(ShmemReq* shmem_req, Byte* cach
                      MYLOG("INV REQ (UPGR)>%u @ %lx",sharers_list_pair.second[i] , shmem_msg->getAddress());
                      // avoid having to fetch the data from DRAM, so ask at least one core to FLUSH instead of INV
                      ShmemMsg::msg_t msg_type = (!requesterHasCopy && i==0) ? ShmemMsg::FLUSH_REQ : ShmemMsg::INV_REQ;
+                     if(msg_type==ShmemMsg::INV_REQ){
+                     }
+                     
                      //ShmemMsg::msg_t msg_type = ShmemMsg::INV_REQ;
                      getMemoryManager()->sendMsg( msg_type, //ShmemMsg::INV_REQ,
                            MemComponent::TAG_DIR, MemComponent::L2_CACHE,
@@ -1029,7 +1033,7 @@ DramDirectoryCntlr::processUpgradeReqFromL2Cache(ShmemReq* shmem_req, Byte* cach
                            NULL, 0,
                            HitWhere::UNKNOWN,
                            shmem_perf_sent == false ? shmem_msg->getPerf() : &m_dummy_shmem_perf,
-                           ShmemPerfModel::_SIM_THREAD);
+                           ShmemPerfModel::_SIM_THREAD,shmem_msg->getBlockType());
                      shmem_perf_sent = true;
                   }
                }
@@ -1114,7 +1118,7 @@ DramDirectoryCntlr::processFlushRepFromL2Cache(core_id_t sender, ShmemMsg* shmem
       else if (shmem_req->getShmemMsg()->getMsgType() == ShmemMsg::SH_REQ)
       {
          // Write Data to Dram
-         sendDataToDram(address, shmem_msg->getRequester(), shmem_msg->getDataBuf(), now);
+         sendDataToDram(address, shmem_msg->getRequester(), shmem_msg->getDataBuf(), now,shmem_msg->getBlockType());
          processShReqFromL2Cache(shmem_req, shmem_msg->getDataBuf());
       }
       else if (shmem_req->getShmemMsg()->getMsgType() == ShmemMsg::UPGRADE_REQ)
@@ -1140,7 +1144,7 @@ DramDirectoryCntlr::processFlushRepFromL2Cache(core_id_t sender, ShmemMsg* shmem
       else // shmem_req->getShmemMsg()->getMsgType() == ShmemMsg::NULLIFY_REQ
       {
          // Write Data To Dram
-         sendDataToDram(address, shmem_msg->getRequester(), shmem_msg->getDataBuf(), now);
+         sendDataToDram(address, shmem_msg->getRequester(), shmem_msg->getDataBuf(), now,shmem_msg->getBlockType());
          processNullifyReq(shmem_req);
       }
    }
@@ -1148,7 +1152,7 @@ DramDirectoryCntlr::processFlushRepFromL2Cache(core_id_t sender, ShmemMsg* shmem
    {
       // This was just an eviction
       // Write Data to Dram
-      sendDataToDram(address, shmem_msg->getRequester(), shmem_msg->getDataBuf(), now);
+      sendDataToDram(address, shmem_msg->getRequester(), shmem_msg->getDataBuf(), now,shmem_msg->getBlockType());
    }
 
    MYLOG("End @ %lx", address);
@@ -1197,19 +1201,18 @@ DramDirectoryCntlr::processWbRepFromL2Cache(core_id_t sender, ShmemMsg* shmem_ms
 }
 
 void
-DramDirectoryCntlr::sendDataToNUCA(IntPtr address, core_id_t requester, Byte* data_buf, SubsecondTime now, bool count)
+DramDirectoryCntlr::sendDataToNUCA(IntPtr address, core_id_t requester, Byte* data_buf, SubsecondTime now, bool count, CacheBlockInfo::block_type_t block_type)
 {
    if (m_nuca_cache)
    {
       bool eviction;
       IntPtr evict_address;
       Byte evict_buf[getCacheBlockSize()];
-
       m_nuca_cache->write(
          address, data_buf,
          eviction, evict_address, evict_buf,
          getShmemPerfModel()->getElapsedTime(ShmemPerfModel::_SIM_THREAD),
-         count
+         count,block_type
       );
 
       if (eviction)
@@ -1225,14 +1228,15 @@ DramDirectoryCntlr::sendDataToNUCA(IntPtr address, core_id_t requester, Byte* da
                evict_buf, getCacheBlockSize(),
                HitWhere::UNKNOWN,
                &m_dummy_shmem_perf,
-               ShmemPerfModel::_SIM_THREAD);
+               ShmemPerfModel::_SIM_THREAD,
+               block_type);
       }
    }
    MYLOG("End");
 }
 
 void
-DramDirectoryCntlr::sendDataToDram(IntPtr address, core_id_t requester, Byte* data_buf, SubsecondTime now)
+DramDirectoryCntlr::sendDataToDram(IntPtr address, core_id_t requester, Byte* data_buf, SubsecondTime now, CacheBlockInfo::block_type_t block_type)
 {
    MYLOG("Start @ %lx", address);
 
@@ -1240,7 +1244,7 @@ DramDirectoryCntlr::sendDataToDram(IntPtr address, core_id_t requester, Byte* da
    {
       // If we have a NUCA cache: write it there, it will be written to DRAM on eviction
 
-      sendDataToNUCA(address, requester, data_buf, now, true);
+      sendDataToNUCA(address, requester, data_buf, now, true, block_type);
    }
    else
    {
@@ -1255,7 +1259,7 @@ DramDirectoryCntlr::sendDataToDram(IntPtr address, core_id_t requester, Byte* da
             data_buf, getCacheBlockSize(),
             HitWhere::UNKNOWN,
             &m_dummy_shmem_perf,
-            ShmemPerfModel::_SIM_THREAD);
+            ShmemPerfModel::_SIM_THREAD,block_type);
 
       // DRAM latency is ignored on write
    }

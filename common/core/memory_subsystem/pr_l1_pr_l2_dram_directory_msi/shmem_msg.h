@@ -3,6 +3,7 @@
 #include "mem_component.h"
 #include "fixed_types.h"
 #include "hit_where.h"
+#include "cache_block_info.h"
 
 class ShmemPerf;
 
@@ -50,6 +51,7 @@ namespace PrL1PrL2DramDirectoryMSI
          Byte* m_data_buf;
          UInt32 m_data_length;
          ShmemPerf* m_perf;
+         CacheBlockInfo::block_type_t m_block_type;
 
       public:
          ShmemMsg() = delete;
@@ -61,7 +63,8 @@ namespace PrL1PrL2DramDirectoryMSI
                IntPtr address,
                Byte* data_buf,
                UInt32 data_length,
-               ShmemPerf* perf);
+               ShmemPerf* perf, CacheBlockInfo::block_type_t block_type);
+
          ShmemMsg(ShmemMsg* shmem_msg);
 
          ~ShmemMsg();
@@ -81,7 +84,7 @@ namespace PrL1PrL2DramDirectoryMSI
          Byte* getDataBuf() { return m_data_buf; }
          UInt32 getDataLength() { return m_data_length; }
          HitWhere::where_t getWhere() { return m_where; }
-
+         CacheBlockInfo::block_type_t getBlockType(){return m_block_type;}
          void setDataBuf(Byte* data_buf) { m_data_buf = data_buf; }
          void setWhere(HitWhere::where_t where) { m_where = where; }
 

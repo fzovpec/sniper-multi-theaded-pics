@@ -24,6 +24,10 @@ const char* shmem_reason_names[] = {
    "dram-queue",
    "dram-bus",
    "dram-device",
+   "dram-cntrl",
+   "dram-refresh",
+   "dram-bank-pending",
+   "dram-bank-conflict",
    "unknown",
 };
 

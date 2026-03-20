@@ -32,6 +32,10 @@ class ShmemPerf
          DRAM_QUEUE,
          DRAM_BUS,
          DRAM_DEVICE,
+         DRAM_CNTLR,
+         DRAM_REFRESH,
+         DRAM_BANK_PENDING,
+         DRAM_BANK_CONFLICT,
          UNKNOWN,
          NUM_SHMEM_TIMES
       } shmem_times_type_t;
