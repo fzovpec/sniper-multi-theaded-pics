@@ -7,7 +7,7 @@
 #include "address_home_lookup.h"
 #include "../pr_l1_pr_l2_dram_directory_msi/shmem_msg.h"
 #include "mem_component.h"
-#include "sem.h"
+#include "semaphore.h"
 #include "lock.h"
 #include "setlock.h"
 #include "fixed_types.h"
@@ -17,17 +17,11 @@
 #include "stats.h"
 #include "subsecond_time.h"
 #include "shmem_perf.h"
-
 #include "boost/tuple/tuple.hpp"
-
+#include "mmu_cache_interface.h"
 class DramCntlrInterface;
 class ATD;
 
-/* Enable to get a detailed count of state transitions */
-//#define ENABLE_TRANSITIONS
-
-/* Enable to track latency by HitWhere */
-//#define TRACK_LATENCY_BY_HITWHERE
 
 // Forward declarations
 namespace ParametricDramDirectoryMSI
@@ -131,11 +125,12 @@ namespace ParametricDramDirectoryMSI
    {
       public:
          bool exclusive;
+         CacheBlockInfo::block_type_t block_type;
          bool isPrefetch;
          CacheCntlr* cache_cntlr;
          SubsecondTime t_issue;
-         CacheDirectoryWaiter(bool _exclusive, bool _isPrefetch, CacheCntlr* _cache_cntlr, SubsecondTime _t_issue) :
-            exclusive(_exclusive), isPrefetch(_isPrefetch), cache_cntlr(_cache_cntlr), t_issue(_t_issue)
+         CacheDirectoryWaiter(bool _exclusive, CacheBlockInfo::block_type_t _block_type,bool _isPrefetch, CacheCntlr* _cache_cntlr, SubsecondTime _t_issue) :
+            exclusive(_exclusive), block_type(_block_type),isPrefetch(_isPrefetch), cache_cntlr(_cache_cntlr), t_issue(_t_issue)
          {}
    };
 
@@ -150,6 +145,7 @@ namespace ParametricDramDirectoryMSI
    {
       private:
          Cache* m_cache;
+      
          Lock m_cache_lock;
          Lock m_smt_lock; //< Only used in L1 cache, to protect against concurrent access from sibling SMT threads
          CacheCntlrList m_prev_cache_cntlrs;
@@ -158,12 +154,14 @@ namespace ParametricDramDirectoryMSI
          ContentionModel* m_dram_outstanding_writebacks;
 
          Mshr mshr;
+         Mshr metadata_mshr;
          ContentionModel m_l1_mshr;
+         ContentionModel m_l1_metadata_mshr;
          ContentionModel m_next_level_read_bandwidth;
          CacheDirectoryWaiterMap m_directory_waiters;
          IntPtr m_evicting_address;
          Byte* m_evicting_buf;
-
+         
          std::vector<ATD*> m_atds;
 
          std::vector<SetLock> m_setlocks;
@@ -172,6 +170,54 @@ namespace ParametricDramDirectoryMSI
 
          std::deque<IntPtr> m_prefetch_list;
          SubsecondTime m_prefetch_next;
+
+         // Speculative-prefetch eviction tracking (L2 only)
+         // 4-way set-associative software cache of recently evicted addresses
+         static const UInt32 SPEC_EVICT_SETS = 64;
+         static const UInt32 SPEC_EVICT_WAYS = 4;
+         struct SpecEvictEntry {
+            IntPtr addr;     // cache-line address (0 = invalid)
+            UInt64 stamp;    // m_l2_demand_count at eviction time
+         };
+         SpecEvictEntry m_spec_evict_table[SPEC_EVICT_SETS][SPEC_EVICT_WAYS];
+         UInt64 m_l2_demand_count;
+
+         UInt32 specEvictIndex(IntPtr addr) const { return (addr >> 6) & (SPEC_EVICT_SETS - 1); }
+         void specEvictInsert(IntPtr addr, UInt64 stamp)
+         {
+            UInt32 set = specEvictIndex(addr);
+            // Find invalid or oldest entry
+            UInt32 victim = 0;
+            UInt64 oldest = UINT64_MAX;
+            for (UInt32 w = 0; w < SPEC_EVICT_WAYS; ++w)
+            {
+               if (m_spec_evict_table[set][w].addr == 0) { victim = w; break; }
+               if (m_spec_evict_table[set][w].stamp < oldest) { oldest = m_spec_evict_table[set][w].stamp; victim = w; }
+            }
+            m_spec_evict_table[set][victim] = {addr, stamp};
+         }
+         // Returns stamp if found (and removes entry), 0 if not found
+         UInt64 specEvictLookupAndRemove(IntPtr addr)
+         {
+            UInt32 set = specEvictIndex(addr);
+            for (UInt32 w = 0; w < SPEC_EVICT_WAYS; ++w)
+            {
+               if (m_spec_evict_table[set][w].addr == addr)
+               {
+                  UInt64 s = m_spec_evict_table[set][w].stamp;
+                  m_spec_evict_table[set][w] = {0, 0};
+                  return s;
+               }
+            }
+            return 0;
+         }
+         void specEvictRemove(IntPtr addr)
+         {
+            UInt32 set = specEvictIndex(addr);
+            for (UInt32 w = 0; w < SPEC_EVICT_WAYS; ++w)
+               if (m_spec_evict_table[set][w].addr == addr)
+                  m_spec_evict_table[set][w] = {0, 0};
+         }
 
          void createSetLocks(UInt32 cache_block_size, UInt32 num_sets, UInt32 core_offset, UInt32 num_cores);
          SetLock* getSetLock(IntPtr addr);
@@ -186,19 +232,23 @@ namespace ParametricDramDirectoryMSI
             , m_dram_cntlr(NULL)
             , m_dram_outstanding_writebacks(NULL)
             , m_l1_mshr(name + ".mshr", core_id, outstanding_misses)
+            , m_l1_metadata_mshr(name + ".metadata-mshr", core_id, outstanding_misses)
             , m_next_level_read_bandwidth(name + ".next_read", core_id)
             , m_evicting_address(0)
             , m_evicting_buf(NULL)
             , m_atds()
             , m_prefetch_list()
             , m_prefetch_next(SubsecondTime::Zero())
-         {}
+            , m_l2_demand_count(0)
+         {
+            memset(m_spec_evict_table, 0, sizeof(m_spec_evict_table));
+         }
          ~CacheMasterCntlr();
 
          friend class CacheCntlr;
    };
 
-   class CacheCntlr : ::CacheCntlr
+   class CacheCntlr : ::CacheCntlr, public MMUCacheInterface
    {
       private:
          // Data Members
@@ -207,24 +257,32 @@ namespace ParametricDramDirectoryMSI
          CacheMasterCntlr* m_master;
          CacheCntlr* m_next_cache_cntlr;
          CacheCntlr* m_last_level;
+
          AddressHomeLookup* m_tag_directory_home_lookup;
          std::unordered_map<IntPtr, MemComponent::component_t> m_shmem_req_source_map;
          bool m_perfect;
          bool m_passthrough;
          bool m_coherent;
          bool m_prefetch_on_prefetch_hit;
-         bool m_train_prefetcher_on_hit;
-         bool m_prefetch_delay;
          bool m_l1_mshr;
+         bool m_l1_metadata_mshr;
+         int mshr_size;
+
+
 
          struct {
-           UInt64 loads, stores;
-           UInt64 load_misses, store_misses;
-           UInt64 load_overlapping_misses, store_overlapping_misses;
-           UInt64 loads_state[CacheState::NUM_CSTATE_STATES], stores_state[CacheState::NUM_CSTATE_STATES];
-           UInt64 loads_where[HitWhere::NUM_HITWHERES], stores_where[HitWhere::NUM_HITWHERES];
-           UInt64 load_misses_state[CacheState::NUM_CSTATE_STATES], store_misses_state[CacheState::NUM_CSTATE_STATES];
-           UInt64 loads_prefetch, stores_prefetch;
+            UInt64 tloads,tstores,tload_misses,tstore_misses;
+           UInt64 loads[CacheBlockInfo::block_type_t::NUM_BLOCK_TYPES], stores[CacheBlockInfo::block_type_t::NUM_BLOCK_TYPES];
+           UInt64 load_misses[CacheBlockInfo::block_type_t::NUM_BLOCK_TYPES], store_misses[CacheBlockInfo::block_type_t::NUM_BLOCK_TYPES];
+           UInt64 load_overlapping_misses[CacheBlockInfo::block_type_t::NUM_BLOCK_TYPES], store_overlapping_misses[CacheBlockInfo::block_type_t::NUM_BLOCK_TYPES];
+           UInt64 load_overlapping[CacheBlockInfo::block_type_t::NUM_BLOCK_TYPES], store_overlapping[CacheBlockInfo::block_type_t::NUM_BLOCK_TYPES];
+           UInt64 loads_state[CacheState::NUM_CSTATE_STATES][CacheBlockInfo::block_type_t::NUM_BLOCK_TYPES], stores_state[CacheState::NUM_CSTATE_STATES][CacheBlockInfo::block_type_t::NUM_BLOCK_TYPES];
+           UInt64 loads_where[CacheBlockInfo::block_type_t::NUM_BLOCK_TYPES][HitWhere::NUM_HITWHERES];
+           UInt64 stores_where[CacheBlockInfo::block_type_t::NUM_BLOCK_TYPES][HitWhere::NUM_HITWHERES];
+
+
+           UInt64 load_misses_state[CacheState::NUM_CSTATE_STATES][CacheBlockInfo::block_type_t::NUM_BLOCK_TYPES], store_misses_state[CacheState::NUM_CSTATE_STATES][CacheBlockInfo::block_type_t::NUM_BLOCK_TYPES];
+           UInt64 loads_prefetch[CacheBlockInfo::block_type_t::NUM_BLOCK_TYPES], stores_prefetch[CacheBlockInfo::block_type_t::NUM_BLOCK_TYPES];
            UInt64 hits_prefetch, // lines which were prefetched and subsequently used by a non-prefetch access
                   evict_prefetch, // lines which were prefetched and evicted before being used
                   invalidate_prefetch; // lines which were prefetched and invalidated before being used
@@ -236,10 +294,23 @@ namespace ParametricDramDirectoryMSI
            UInt64 backinval[CacheState::NUM_CSTATE_STATES];
            UInt64 hits_warmup, evict_warmup, invalidate_warmup;
            SubsecondTime total_latency;
+           SubsecondTime total_data_latency;
+           SubsecondTime total_metadata_latency;
+           
            SubsecondTime snoop_latency;
            SubsecondTime qbs_query_latency;
            SubsecondTime mshr_latency;
+           SubsecondTime metadata_mshr_latency;
+
+
+
            UInt64 prefetches;
+           UInt64 prefetches_fillup; // We track only the prefetches that actually caused a fillup in the L2 cache
+           UInt64 late_metadata_prefetches;
+
+
+           UInt64 spec_evict_total;    // L2 evictions caused by speculative prefetches
+           UInt64 spec_evict_harmful;  // of those, demand misses within access window
            UInt64 coherency_downgrades, coherency_upgrades, coherency_invalidates, coherency_writebacks;
            #ifdef ENABLE_TRANSITIONS
            UInt64 transitions[CacheState::NUM_CSTATE_SPECIAL_STATES][CacheState::NUM_CSTATE_SPECIAL_STATES];
@@ -251,8 +322,9 @@ namespace ParametricDramDirectoryMSI
          std::unordered_map<HitWhere::where_t, StatHist> lat_by_where;
          #endif
 
-         void updateCounters(Core::mem_op_t mem_op_type, IntPtr address, bool cache_hit, CacheState::cstate_t state, Prefetch::prefetch_type_t isPrefetch);
+         void updateCounters(Core::mem_op_t mem_op_type, IntPtr address, bool cache_hit, CacheState::cstate_t state,CacheBlockInfo::block_type_t block_type, Prefetch::prefetch_type_t isPrefetch);
          void cleanupMshr();
+         void cleanupMetadataMshr();
          void transition(IntPtr address, Transition::reason_t reason, CacheState::cstate_t old_state, CacheState::cstate_t new_state);
          void updateUncoreStatistics(HitWhere::where_t hit_where, SubsecondTime now);
 
@@ -275,7 +347,14 @@ namespace ParametricDramDirectoryMSI
          UInt64 m_shmem_perf_numrequests;
          ShmemPerf m_dummy_shmem_perf;
 
+         // Timing experiment: tracks when the last prefetch completed
+         SubsecondTime m_last_prefetch_completion;
+
+         // Flag: currently executing a speculative prefetch from the MMU
+         bool m_doing_spec_prefetch;
+
          ShmemPerfModel* m_shmem_perf_model;
+         int metadata_passthrough_loc;
 
          // Core-interfacing stuff
          void accessCache(
@@ -285,13 +364,12 @@ namespace ParametricDramDirectoryMSI
          bool operationPermissibleinCache(
                IntPtr address, Core::mem_op_t mem_op_type, CacheBlockInfo **cache_block_info = NULL);
 
-         void copyDataFromNextLevel(Core::mem_op_t mem_op_type, IntPtr address, bool modeled, SubsecondTime t_start);
-         void trainPrefetcher(IntPtr address, bool cache_hit, bool prefetch_hit, bool prefetch_own, SubsecondTime t_issue);
-         void Prefetch(SubsecondTime t_start);
-         void doPrefetch(IntPtr prefetch_address, SubsecondTime t_start);
-
+         void copyDataFromNextLevel(Core::mem_op_t mem_op_type, IntPtr address, bool modeled, SubsecondTime t_start, CacheBlockInfo::block_type_t block_type);
+         void trainPrefetcher(IntPtr eip, IntPtr address, Core::mem_op_t mem_op_type,  bool cache_hit, bool prefetch_hit, SubsecondTime t_issue);
+         void Prefetch(IntPtr eip, SubsecondTime t_start);
          // Cache meta-data operations
          SharedCacheBlockInfo* getCacheBlockInfo(IntPtr address);
+         CacheBlockInfo::block_type_t getCacheBlockType(IntPtr address);
          CacheState::cstate_t getCacheState(IntPtr address);
          CacheState::cstate_t getCacheState(CacheBlockInfo *cache_block_info);
          SharedCacheBlockInfo* setCacheState(IntPtr address, CacheState::cstate_t cstate);
@@ -301,19 +379,20 @@ namespace ParametricDramDirectoryMSI
          void retrieveCacheBlock(IntPtr address, Byte* data_buf, ShmemPerfModel::Thread_t thread_num, bool update_replacement);
 
 
-         SharedCacheBlockInfo* insertCacheBlock(IntPtr address, CacheState::cstate_t cstate, Byte* data_buf, core_id_t requester, ShmemPerfModel::Thread_t thread_num);
+         inline CacheBlockInfo::block_type_t getCacheBlockTypeFromOrigin(Core::mem_origin_t mem_origin) { return (mem_origin == Core::mem_origin_t::PAGE_TABLE_WALK ? CacheBlockInfo::block_type_t::PAGE_TABLE_DATA : CacheBlockInfo::block_type_t::DATA); }
+         SharedCacheBlockInfo* insertCacheBlock(IntPtr address, CacheState::cstate_t cstate, Byte* data_buf, core_id_t requester, ShmemPerfModel::Thread_t thread_num, CacheBlockInfo::block_type_t btype = CacheBlockInfo::block_type_t::DATA);
          std::pair<SubsecondTime, bool> updateCacheBlock(IntPtr address, CacheState::cstate_t cstate, Transition::reason_t reason, Byte* out_buf, ShmemPerfModel::Thread_t thread_num);
          void writeCacheBlock(IntPtr address, UInt32 offset, Byte* data_buf, UInt32 data_length, ShmemPerfModel::Thread_t thread_num);
 
          // Handle Request from previous level cache
-         HitWhere::where_t processShmemReqFromPrevCache(CacheCntlr* requester, Core::mem_op_t mem_op_type, IntPtr address, bool modeled, bool count, Prefetch::prefetch_type_t isPrefetch, SubsecondTime t_issue, bool have_write_lock);
+         HitWhere::where_t processShmemReqFromPrevCache(IntPtr eip, CacheCntlr* requester, Core::mem_op_t mem_op_type, IntPtr address, UInt32 offset, UInt32 data_length, bool modeled, bool count,CacheBlockInfo::block_type_t block_type,  Prefetch::prefetch_type_t isPrefetch, SubsecondTime t_issue, bool have_write_lock, Core::mem_origin_t mem_origin);
 
          // Process Request from L1 Cache
-         boost::tuple<HitWhere::where_t, SubsecondTime> accessDRAM(Core::mem_op_t mem_op_type, IntPtr address, bool isPrefetch, Byte* data_buf);
-         void initiateDirectoryAccess(Core::mem_op_t mem_op_type, IntPtr address, bool isPrefetch, SubsecondTime t_issue);
-         void processExReqToDirectory(IntPtr address);
-         void processShReqToDirectory(IntPtr address);
-         void processUpgradeReqToDirectory(IntPtr address, ShmemPerf *perf, ShmemPerfModel::Thread_t thread_num);
+         boost::tuple<HitWhere::where_t, SubsecondTime> accessDRAM(Core::mem_op_t mem_op_type, IntPtr address, bool isPrefetch, Byte* data_buf,bool metadata_request);
+         void initiateDirectoryAccess(Core::mem_op_t mem_op_type, IntPtr address, CacheBlockInfo::block_type_t block_type,bool isPrefetch, SubsecondTime t_issue);
+         void processExReqToDirectory(IntPtr address,CacheBlockInfo::block_type_t block_type);
+         void processShReqToDirectory(IntPtr address,CacheBlockInfo::block_type_t block_type);
+         void processUpgradeReqToDirectory(IntPtr address, ShmemPerf *perf, ShmemPerfModel::Thread_t thread_num,CacheBlockInfo::block_type_t block_type);
 
          // Process Request from Dram Dir
          void processExRepFromDramDirectory(core_id_t sender, core_id_t requester, PrL1PrL2DramDirectoryMSI::ShmemMsg* shmem_msg);
@@ -364,6 +443,11 @@ namespace ParametricDramDirectoryMSI
                ShmemPerfModel* shmem_perf_model,
                bool is_last_level_cache);
 
+         void doPrefetch(IntPtr eip, IntPtr prefetch_address, SubsecondTime t_start, CacheBlockInfo::block_type_t block_type = CacheBlockInfo::block_type_t::DATA);
+
+         // Returns the time at which the last doPrefetch completed (data available in cache)
+         SubsecondTime getLastPrefetchCompletion() const { return m_last_prefetch_completion; }
+
          virtual ~CacheCntlr();
 
          Cache* getCache() { return m_master->m_cache; }
@@ -375,12 +459,38 @@ namespace ParametricDramDirectoryMSI
          void setDRAMDirectAccess(DramCntlrInterface* dram_cntlr, UInt64 num_outstanding);
 
          HitWhere::where_t processMemOpFromCore(
+               IntPtr eip,
                Core::lock_signal_t lock_signal,
                Core::mem_op_t mem_op_type,
                IntPtr ca_address, UInt32 offset,
                Byte* data_buf, UInt32 data_length,
                bool modeled,
-               bool count);
+               bool count,CacheBlockInfo::block_type_t block_type,SubsecondTime TLB_latency,
+               Core::mem_origin_t mem_origin = Core::mem_origin_t::NORMAL);
+
+         // MMUCacheInterface overrides — delegate to the concrete methods
+         HitWhere::where_t handleMMUCacheAccess(
+               IntPtr eip, Core::lock_signal_t lock_signal,
+               Core::mem_op_t mem_op_type,
+               IntPtr ca_address, UInt32 offset,
+               Byte* data_buf, UInt32 data_length,
+               bool modeled, bool count,
+               CacheBlockInfo::block_type_t block_type,
+               SubsecondTime t_start) override
+         {
+            return processMemOpFromCore(eip, lock_signal, mem_op_type,
+               ca_address, offset, data_buf, data_length,
+               modeled, count, block_type, t_start);
+         }
+         void handleMMUPrefetch(IntPtr eip, IntPtr prefetch_address,
+               SubsecondTime t_start,
+               CacheBlockInfo::block_type_t block_type = CacheBlockInfo::block_type_t::DATA) override
+         {
+            m_doing_spec_prefetch = true;
+            doPrefetch(eip, prefetch_address, t_start, block_type);
+            m_doing_spec_prefetch = false;
+         }
+
          void updateHits(Core::mem_op_t mem_op_type, UInt64 hits);
 
          // Notify next level cache of so it can update its sharing set
