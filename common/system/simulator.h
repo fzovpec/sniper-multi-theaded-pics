@@ -29,6 +29,7 @@ class FaultinjectionManager;
 class TagsManager;
 class RoutineTracer;
 class MemoryTracker;
+class MimicOS;
 namespace config { class Config; }
 
 class Simulator
@@ -71,6 +72,8 @@ public:
    RoutineTracer *getRoutineTracer() { return m_rtn_tracer; }
    MemoryTracker *getMemoryTracker() { return m_memory_tracker; }
    void setMemoryTracker(MemoryTracker *memory_tracker) { m_memory_tracker = memory_tracker; }
+   MimicOS *getMimicOS() { return m_mimicos; }
+   MimicOS *getMimicOS_VM() { return m_mimicos_vm; }
 
    bool isRunning() { return m_running; }
    static void enablePerformanceModels();
@@ -106,6 +109,8 @@ private:
    FaultinjectionManager *m_faultinjection_manager;
    RoutineTracer *m_rtn_tracer;
    MemoryTracker *m_memory_tracker;
+   MimicOS *m_mimicos;
+   MimicOS *m_mimicos_vm;
 
    bool m_running;
    bool m_inst_mode_output;

@@ -27,6 +27,7 @@
 #include "instruction_tracer.h"
 #include "memory_tracker.h"
 #include "circular_log.h"
+#include "mimicos.h"
 
 #include <sstream>
 
@@ -122,6 +123,8 @@ Simulator::Simulator()
    , m_faultinjection_manager(NULL)
    , m_rtn_tracer(NULL)
    , m_memory_tracker(NULL)
+   , m_mimicos(NULL)
+   , m_mimicos_vm(NULL)
    , m_running(false)
    , m_inst_mode_output(true)
 {
@@ -150,6 +153,24 @@ void Simulator::start()
    m_fastforward_performance_manager = FastForwardPerformanceManager::create();
    m_rtn_tracer = RoutineTracer::create();
    m_thread_manager = new ThreadManager();
+
+   // Initialize MimicOS: simulated OS for page table management, physical
+   // memory allocation, and page fault handling
+   m_mimicos = new MimicOS(false); // Host OS
+
+   bool virtualized_system = Sim()->getCfg()->getBool("general/enable_virtualized_system");
+   if (virtualized_system) {
+      m_mimicos_vm = new MimicOS(true); // Guest OS
+   }
+
+   // Initialize per-core stats in MimicOS (for adaptive policies)
+   assert(m_mimicos != NULL && "MimicOS (host) must be constructed before per-core init");
+   m_mimicos->initPerCoreStats(Sim()->getConfig()->getTotalCores());
+   m_mimicos->initPerCorePageFaultState(Sim()->getConfig()->getTotalCores());
+   if (m_mimicos_vm != NULL) {
+      m_mimicos_vm->initPerCoreStats(Sim()->getConfig()->getTotalCores());
+      m_mimicos_vm->initPerCorePageFaultState(Sim()->getConfig()->getTotalCores());
+   }
 
    if (Sim()->getCfg()->getBool("traceinput/enabled"))
       m_trace_manager = new TraceManager();
@@ -251,6 +272,10 @@ Simulator::~Simulator()
    //delete m_thread_manager;            m_thread_manager = NULL;
    delete m_thread_stats_manager;      m_thread_stats_manager = NULL;
    delete m_core_manager;              m_core_manager = NULL;
+   if (m_mimicos_vm) {
+      delete m_mimicos_vm;             m_mimicos_vm = NULL;
+   }
+   delete m_mimicos;                   m_mimicos = NULL;
    delete m_dvfs_manager;              m_dvfs_manager = NULL;
    delete m_magic_server;              m_magic_server = NULL;
    delete m_sync_server;               m_sync_server = NULL;

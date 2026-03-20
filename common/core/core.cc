@@ -16,6 +16,8 @@
 #include "stats.h"
 #include "topology_info.h"
 #include "cheetah_manager.h"
+#include "misc/exception_handler_base.h"
+#include "exception_handler_factory.h"
 
 #include <cstring>
 
@@ -102,6 +104,8 @@ Core::Core(SInt32 id)
          this, m_network, m_shmem_perf_model);
 
    m_performance_model = PerformanceModel::create(this);
+
+   m_exception_handler = ExceptionHandlerFactory::createExceptionHandler(this);
 }
 
 Core::~Core()
@@ -109,6 +113,7 @@ Core::~Core()
    if (m_cheetah_manager)
       delete m_cheetah_manager;
    delete m_topology_info;
+   delete m_exception_handler;
    delete m_memory_manager;
    delete m_shmem_perf_model;
    delete m_performance_model;
