@@ -5,6 +5,10 @@
 
 namespace Sift
 {
+   struct Message{
+      int argc;
+      uint64_t *argv;
+   };
    void hexdump(const void * data, uint32_t size);
 };
 
