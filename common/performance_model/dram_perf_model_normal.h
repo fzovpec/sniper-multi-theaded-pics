@@ -20,11 +20,11 @@ class DramPerfModelNormal : public DramPerfModel
 
    public:
       DramPerfModelNormal(core_id_t core_id,
-            UInt32 cache_block_size);
+            UInt32 cache_block_size, const String& suffix = "");
 
       ~DramPerfModelNormal();
 
-      SubsecondTime getAccessLatency(SubsecondTime pkt_time, UInt64 pkt_size, core_id_t requester, IntPtr address, DramCntlrInterface::access_t access_type, ShmemPerf *perf);
+      SubsecondTime getAccessLatency(SubsecondTime pkt_time, UInt64 pkt_size, core_id_t requester, IntPtr address, DramCntlrInterface::access_t access_type, ShmemPerf *perf,bool is_metadata);
 };
 
 #endif /* __DRAM_PERF_MODEL_NORMAL_H__ */
