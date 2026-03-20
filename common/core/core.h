@@ -1,11 +1,14 @@
 #ifndef CORE_H
 #define CORE_H
+#include <fstream>
+
 
 // some forward declarations for cross includes
 class Thread;
 class Network;
 class MemoryManagerBase;
 class MemoryManagerFast;
+class ExceptionHandlerBase;
 class PerformanceModel;
 class ClockSkewMinimizationClient;
 class ShmemPerfModel;
@@ -20,6 +23,7 @@ class CheetahManager;
 #include "bbv_count.h"
 #include "cpuid.h"
 #include "hit_where.h"
+#include <vector>
 
 struct MemoryResult {
    HitWhere::where_t hit_where;
@@ -67,6 +71,13 @@ class Core
          NUM_MEM_OP_TYPES = MAX_MEM_OP - MIN_MEM_OP + 1
       };
 
+      enum mem_origin_t
+      {
+         PAGE_TABLE_WALK = 0,
+         NORMAL,
+         NUM_MEM_ORIGINS
+      };
+
       /* To what extend to make a memory access visible to the simulated instruction */
       enum MemModeled
       {
@@ -108,6 +119,8 @@ class Core
       ClockSkewMinimizationClient* getClockSkewMinimizationClient() const { return m_clock_skew_minimization_client; }
       MemoryManagerBase *getMemoryManager() { return m_memory_manager; }
       const MemoryManagerBase *getMemoryManager() const { return m_memory_manager; }
+      ExceptionHandlerBase *getExceptionHandler() { return m_exception_handler; }
+      const ExceptionHandlerBase *getExceptionHandler() const { return m_exception_handler; }
       ShmemPerfModel* getShmemPerfModel() { return m_shmem_perf_model; }
       const ComponentPeriod* getDvfsDomain() const { return m_dvfs_domain; }
       TopologyInfo* getTopologyInfo() { return m_topology_info; }
@@ -137,6 +150,7 @@ class Core
       core_id_t m_core_id;
       const ComponentPeriod* m_dvfs_domain;
       MemoryManagerBase *m_memory_manager;
+      ExceptionHandlerBase *m_exception_handler;
       Thread *m_thread;
       Network *m_network;
       PerformanceModel *m_performance_model;
