@@ -124,7 +124,8 @@ def generate_simout(jobid = None, resultsdir = None, partial = None, output = sy
     results['%s.misses'%c] = list(map(sum, list(zip(results['%s.read-misses'%c], results['%s.write-misses'%c]))))
     results['%s.missrate'%c] = [100*a_b4[0]/float(a_b4[1]) if a_b4[1] else float('inf') for a_b4 in zip(results['%s.misses'%c], results['%s.accesses'%c])]
     icount = sum(results['performance_model.instruction_count'])
-    icount /= len([ v for v in results['%s.accesses'%c] if v ]) # Assume instructions are evenly divided over all cache slices
+    num_active_slices = len([ v for v in results['%s.accesses'%c] if v ])
+    icount /= num_active_slices if num_active_slices else 1  # Assume instructions are evenly divided over all cache slices
     results['%s.mpki'%c] = [1000*a/float(icount) if icount else float('inf') for a in results['%s.misses'%c]]
     template.extend([
       ('  %s cache'% c.split('-')[0].upper(), '', ''),

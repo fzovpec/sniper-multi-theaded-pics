@@ -1398,7 +1398,16 @@ void TraceThread::m_run_func_with_userpace_mimicos()
          // Force BBV end on non-taken branches
          m_bbv_end = inst.is_branch;
 
-         if (inst.is_champsim)
+         // Kernel-mode (MimicOS) instructions are always fast-forwarded:
+         // we only model the application's performance in detail.
+         bool in_kernel_mode = (getCurrentSiftReader() != getAppSiftReader());
+
+         if (in_kernel_mode)
+         {
+            // Fast-forward: just count the instruction
+            core->countInstructions(0, 1);
+         }
+         else if (inst.is_champsim)
          {
             switch(Sim()->getInstrumentationMode())
             {
@@ -1463,7 +1472,7 @@ void TraceThread::m_run_func_with_userpace_mimicos()
          if (mimic_os->getIsPageFault(pf_core_id))
          {
             kernel_start_time = prfmdl->getElapsedTime();
-            // Page fault must occur only in user space
+            // Page fault must occur only in user space (app reader active)
             assert(getCurrentSiftReader() == getAppSiftReader());
 #if DEBUG_TRACE_THREAD >= DEBUG_DETAILED
             std::cout << "[TRACE:" << m_thread->getId() << "] -- Switching SIFT reader back to the kernel due to page fault CS --" << std::endl;

@@ -576,12 +576,15 @@ namespace ParametricDramDirectoryMSI
 			}
 		}
 
-		// NOTE: Dual-trace (kernel/app SIFT reader) support requires the MimicOS
-		// trace frontend series.  When userspace MimicOS is enabled but the trace
-		// infrastructure is not available, we conservatively perform translation
-		// for every access (i.e. we never set skip_translation based on trace context).
-		(void)app_id;
-		(void)thread_id;
+		// When running userspace MimicOS, the kernel (MimicOS binary) uses physical
+		// addresses directly — skip translation for kernel-mode accesses.
+		// Only translate when the app SIFT reader is active (application code).
+		TraceThread *trace_thread = Sim()->getTraceManager()->getTraceThread(app_id, thread_id);
+		if (trace_thread->getCurrentSiftReader() == trace_thread->getKernelSiftReader()
+		    && Sim()->getMimicOS()->isUserspaceMimicosEnabled())
+		{
+			skip_translation = true;
+		}
 
 		LOG_ASSERT_ERROR(mem_component <= m_last_level_cache,
 						 "Error: invalid mem_component (%d) for coreInitiateMemoryAccess", mem_component);

@@ -11,6 +11,12 @@
 #include "stats.h"
 #include "timer.h"
 #include "thread.h"
+#include "trace_manager.h"
+#include "trace_thread.h"
+#include "mimicos.h"
+#include "debug_config.h"
+#include "misc/exception_handler_base.h"
+#include "sift_utils.h"
 
 MagicServer::MagicServer()
       : m_performance_enabled(false)
@@ -188,6 +194,78 @@ UInt64 MagicServer::Magic_unlocked(thread_id_t thread_id, core_id_t core_id, UIn
          return ret;
       }
 
+      case SIM_CMD_CONTEXT_SWITCH:
+      {
+#if DEBUG_MAGIC_SERVER >= DEBUG_DETAILED
+         std::cout << "[MimicOS: Magic] Context switch command received" << std::endl;
+#endif
+         auto trace_thread = Sim()->getTraceManager()->getTraceThread(0, 0);
+
+         // Restore the current SIFT Reader to be the App one
+         trace_thread->setCurrentSiftReader(trace_thread->getAppSiftReader());
+#if DEBUG_MAGIC_SERVER >= DEBUG_DETAILED
+         std::cout << "[MimicOS: Magic] Current SiftReader set to APP" << std::endl;
+#endif
+         return 42;
+      }
+      case SIM_CMD_RECEIVE_MESSAGE:
+      {
+#if DEBUG_MAGIC_SERVER >= DEBUG_DETAILED
+         std::cout << "[MimicOS: Magic] Receive message command" << std::endl;
+#endif
+         Core *core = Sim()->getCoreManager()->getCoreFromID(core_id);
+         MimicOS_NS::Message* message = Sim()->getMimicOS()->getMessage();
+
+         // Write argc to the core's memory
+         core->accessMemory(Core::NONE, Core::WRITE, arg0, (char*)&message->argc, sizeof(int), Core::MEM_MODELED_NONE);
+
+         // Write argv entries
+         for (int i = 0; i < message->argc; i++)
+         {
+            core->accessMemory(Core::NONE, Core::WRITE, arg1 + i * sizeof(uint64_t), (char*)&message->argv[i], sizeof(uint64_t), Core::MEM_MODELED_NONE);
+         }
+         return 0;
+      }
+      case SIM_CMD_MIMICOS_RESULT:
+      {
+#if DEBUG_MAGIC_SERVER >= DEBUG_DETAILED
+         std::cout << "[MimicOS: Magic] MimicOS result command" << std::endl;
+#endif
+         Core *core = Sim()->getCoreManager()->getCoreFromID(core_id);
+
+         Sift::Message msg;
+         msg.argc = arg0;
+         msg.argv = new uint64_t[msg.argc];
+
+         for (int i = 0; i < msg.argc; i++)
+         {
+            core->accessMemory(Core::NONE, Core::READ, arg1 + i * sizeof(uint64_t), (char*)&msg.argv[i], sizeof(uint64_t));
+         }
+
+         int exception_type_code = msg.argv[0];
+         core->getExceptionHandler()->handle_exception(exception_type_code, msg.argc, msg.argv);
+
+         delete[] msg.argv;
+         return 0;
+      }
+      case SIM_CMD_START_PROCESS:
+      {
+         char str[256];
+         Core *core = Sim()->getCoreManager()->getCoreFromID(core_id);
+         core->accessMemory(Core::NONE, Core::READ, arg0, str, 256, Core::MEM_MODELED_NONE);
+         str[255] = '\0';
+
+#if DEBUG_MAGIC_SERVER >= DEBUG_DETAILED
+         std::cout << "[MimicOS: Magic] Starting process: " << str << std::endl;
+#endif
+         Sim()->getTraceManager()->createTraceBasedApplication(SubsecondTime::Zero(), str, thread_id);
+         return 0;
+      }
+      case SIM_CMD_MALLOC:
+      {
+         // Placeholder for malloc tracking
+         return 0;
+      }
       default:
          LOG_ASSERT_ERROR(false, "Got invalid Magic %lu, arg0(%lu) arg1(%lu)", cmd, arg0, arg1);
    }
