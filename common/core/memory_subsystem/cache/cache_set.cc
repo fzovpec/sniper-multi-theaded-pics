@@ -328,23 +328,3 @@ uint64_t CacheSet::countPageWalkCacheBlocks()
    }
    return count;
 }
-// All legacy metadata counting functions now use countPageWalkCacheBlocks()
-uint64_t CacheSet::countSecurityCacheBlocks()
-{
-   return countPageWalkCacheBlocks();
-}
-uint64_t CacheSet::countExpressiveCacheBlocks()
-{
-   return countPageWalkCacheBlocks();
-}
-
-uint64_t CacheSet::countUtopiaCacheBlocks()
-{
-   return countPageWalkCacheBlocks();
-}
-
-
-uint64_t CacheSet::countTLBCacheBlocks()
-{
-   return countPageWalkCacheBlocks();
-}

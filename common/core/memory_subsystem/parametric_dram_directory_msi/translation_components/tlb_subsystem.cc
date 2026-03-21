@@ -180,7 +180,7 @@ namespace ParametricDramDirectoryMSI
 
             // Register PQ prefetchers as victim observers on the non-PQ TLBs
             // at the same level.  When those TLBs evict entries, the eviction
-            // is forwarded to the PQ prefetchers (e.g., RecencyTLBPrefetcher)
+            // is forwarded to the PQ prefetchers
             // via notifyVictim().  Only same-level wiring is needed: L1
             // evictions cascade into L2 allocations (possibly causing L2
             // evictions that ARE forwarded), so an L1 eviction alone does NOT

@@ -286,14 +286,6 @@ namespace ParametricDramDirectoryMSI
 			return "page_table_data";
 		case CacheBlockInfo::block_type_t::PAGE_TABLE_INSTRUCTION:
 			return "page_table_instruction";
-		case CacheBlockInfo::block_type_t::UTOPIA_FP:
-			return "utopia_fp";
-		case CacheBlockInfo::block_type_t::UTOPIA_TAR:
-			return "utopia_tar";
-		case CacheBlockInfo::block_type_t::UTOPIA_RADIX_INTERNAL:
-			return "utopia_radix_internal";
-		case CacheBlockInfo::block_type_t::UTOPIA_RADIX_LEAF:
-			return "utopia_radix_leaf";
 		case CacheBlockInfo::block_type_t::INSTRUCTION:
 			return "instruction";
 		case CacheBlockInfo::block_type_t::DATA:

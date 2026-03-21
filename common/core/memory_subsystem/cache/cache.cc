@@ -729,12 +729,6 @@ void Cache::saveSnapshotHeatmap(const std::string& filename) const
 			case CacheBlockInfo::PAGE_TABLE_INSTRUCTION:
 				r = 255; g = 128; b = 0;   // Orange (page table instruction)
 				break;
-			case CacheBlockInfo::UTOPIA_FP:
-				r = 255; g = 0; b = 255;   // Magenta (metadata FP)
-				break;
-			case CacheBlockInfo::UTOPIA_TAR:
-				r = 128; g = 0; b = 255;   // Purple (metadata TAR)
-				break;
 			case CacheBlockInfo::INSTRUCTION:
 				r = 0; g = 255; b = 0;   // Green (instructions)
 				break;
@@ -786,7 +780,7 @@ Cache::logCacheContentDistribution(UInt64 access_count)
 		m_content_log.open(log_filename.c_str());
 		if (m_content_log.is_open()) {
 			m_content_log << "l2_accesses,total_blocks,valid_blocks,data_blocks,instruction_blocks,"
-			              << "pt_data_blocks,pt_instr_blocks,utopia_fp_blocks,utopia_tar_blocks,"
+			              << "pt_data_blocks,pt_instr_blocks,"
 			              << "invalid_blocks,data_pct,metadata_pct" << std::endl;
 			m_content_log_initialized = true;
 			std::cout << "[L2 Content] Opened log file: " << log_filename << std::endl;
@@ -803,8 +797,6 @@ Cache::logCacheContentDistribution(UInt64 access_count)
 	UInt64 instruction_blocks = 0;
 	UInt64 pt_data_blocks = 0;      // Page table for data translations
 	UInt64 pt_instr_blocks = 0;     // Page table for instruction translations
-	UInt64 utopia_fp_blocks = 0;    // Utopia FPA metadata
-	UInt64 utopia_tar_blocks = 0;   // Utopia TAR metadata
 	UInt64 invalid_blocks = 0;
 
 	for (UInt32 set_idx = 0; set_idx < m_num_sets; ++set_idx) {
@@ -829,12 +821,6 @@ Cache::logCacheContentDistribution(UInt64 access_count)
 					case CacheBlockInfo::block_type_t::PAGE_TABLE_INSTRUCTION:
 						pt_instr_blocks++;
 						break;
-					case CacheBlockInfo::block_type_t::UTOPIA_FP:
-						utopia_fp_blocks++;
-						break;
-					case CacheBlockInfo::block_type_t::UTOPIA_TAR:
-						utopia_tar_blocks++;
-						break;
 					default:
 						// Treat unknown types as data
 						data_blocks++;
@@ -847,7 +833,7 @@ Cache::logCacheContentDistribution(UInt64 access_count)
 	}
 
 	// Calculate percentages (of valid blocks)
-	UInt64 total_metadata = pt_data_blocks + pt_instr_blocks + utopia_fp_blocks + utopia_tar_blocks;
+	UInt64 total_metadata = pt_data_blocks + pt_instr_blocks;
 	double data_pct = (valid_blocks > 0) ? (100.0 * (data_blocks + instruction_blocks) / valid_blocks) : 0.0;
 	double metadata_pct = (valid_blocks > 0) ? (100.0 * total_metadata / valid_blocks) : 0.0;
 
@@ -859,8 +845,6 @@ Cache::logCacheContentDistribution(UInt64 access_count)
 	              << instruction_blocks << ","
 	              << pt_data_blocks << ","
 	              << pt_instr_blocks << ","
-	              << utopia_fp_blocks << ","
-	              << utopia_tar_blocks << ","
 	              << invalid_blocks << ","
 	              << std::fixed << std::setprecision(2) << data_pct << ","
 	              << std::fixed << std::setprecision(2) << metadata_pct << std::endl;
@@ -869,8 +853,7 @@ Cache::logCacheContentDistribution(UInt64 access_count)
 	std::cout << "[L2 Content] Core " << m_core_id << " @ " << access_count << " accesses: "
 	          << valid_blocks << "/" << total_blocks << " valid, "
 	          << data_blocks << " data, " << instruction_blocks << " instr, "
-	          << "PT[D:" << pt_data_blocks << " I:" << pt_instr_blocks << "] "
-	          << "Utopia[FP:" << utopia_fp_blocks << " TAR:" << utopia_tar_blocks << "] ("
+	          << "PT[D:" << pt_data_blocks << " I:" << pt_instr_blocks << "] ("
 	          << std::fixed << std::setprecision(1) << metadata_pct << "% metadata)" << std::endl;
 #endif
 

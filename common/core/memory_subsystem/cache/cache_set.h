@@ -77,10 +77,6 @@ class CacheSet
       bool isValidReplacement(UInt32 index);
 
       uint64_t countPageWalkCacheBlocks();
-      uint64_t countSecurityCacheBlocks();
-      uint64_t countExpressiveCacheBlocks();
-      uint64_t countUtopiaCacheBlocks();
-      uint64_t countTLBCacheBlocks();
 
 };
 

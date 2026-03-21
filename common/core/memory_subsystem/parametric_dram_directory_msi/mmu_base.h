@@ -141,8 +141,6 @@ namespace ParametricDramDirectoryMSI
 		}
 
 		virtual IntPtr performAddressTranslation(IntPtr eip, IntPtr address, bool instruction, Core::lock_signal_t lock, bool modeled, bool count) = 0; //Returns translation latency + translated address (physical address)
-		virtual IntPtr performAddressTranslationFrontend(IntPtr eip, IntPtr address, bool instruction, Core::lock_signal_t lock, bool modeled, bool count){ return IntPtr(0); };
-		virtual IntPtr performAddressTranslationBackend(IntPtr eip, IntPtr address, bool instruction, Core::lock_signal_t lock, bool modeled, bool count){ return IntPtr(0); };
         virtual SubsecondTime accessCache(translationPacket packet, SubsecondTime t_start, bool is_prefetch, HitWhere::where_t& out_hit_where);		
         virtual PTWResult filterPTWResult(IntPtr address, PTWResult ptw_result, PageTable *page_table, bool count) = 0;
 		virtual BaseFilter* getPTWFilter() { return nullptr; }
