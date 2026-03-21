@@ -23,7 +23,6 @@ public:
    {
       PARAMETRIC_DRAM_DIRECTORY_MSI,
       FAST_NEHALEM,
-      FAST_DETAILED,
       NUM_CACHING_PROTOCOL_TYPES
    };
 

@@ -93,6 +93,9 @@ def run_single_test(
     output_dir: str,
     instruction_count: int,
     timeout: int,
+    userspace_mimicos: bool = False,
+    mimicos_binary: str = "",
+    mimicos_config: str = "",
 ) -> Tuple[bool, float, str]:
     """
     Run a single Sniper simulation.
@@ -101,13 +104,23 @@ def run_single_test(
     os.makedirs(output_dir, exist_ok=True)
 
     run_sniper = os.path.join(sniper_root, "run-sniper")
-    cmd = (
-        f"{run_sniper} --no-cache-warming "
-        f"-s stop-by-icount:{instruction_count} "
-        f"{cfg_flags} "
-        f"-d {output_dir} "
-        f"--traces={trace_path}"
-    )
+    if userspace_mimicos:
+        output_prefix = os.path.join(output_dir, "mimicos_output")
+        cmd = (
+            f"{run_sniper} --no-cache-warming --genstats "
+            f"-s stop-by-icount:{instruction_count} --roi "
+            f"{cfg_flags} "
+            f"-d {output_dir} "
+            f"-- {mimicos_binary} {mimicos_config} {trace_path} {output_prefix}"
+        )
+    else:
+        cmd = (
+            f"{run_sniper} --no-cache-warming "
+            f"-s stop-by-icount:{instruction_count} "
+            f"{cfg_flags} "
+            f"-d {output_dir} "
+            f"--traces={trace_path}"
+        )
 
     t0 = time.time()
     try:
@@ -185,6 +198,9 @@ def main():
     all_cfg_keys: List[str] = []
     instruction_count = 0
     trace_suite_name = None
+    userspace_mimicos = False
+    mimicos_binary = ""
+    mimicos_config = ""
 
     for suite_name in args.suite:
         if suite_name not in suites_data:
@@ -195,6 +211,10 @@ def main():
         all_cfg_keys.extend(suite.get("configs", []))
         instruction_count = max(instruction_count, int(suite.get("instruction_count", 10_000_000)))
         trace_suite_name = suite.get("trace_suite", trace_suite_name)
+        if suite.get("userspace_mimicos", False):
+            userspace_mimicos = True
+            mimicos_binary = os.path.join(sniper_root, suite.get("mimicos_binary", "mimicos/build/startup_mimicos"))
+            mimicos_config = os.path.join(sniper_root, suite.get("mimicos_config", "mimicos/configs/reservethp_32GB.ini"))
 
     if args.instruction_count:
         instruction_count = args.instruction_count
@@ -240,6 +260,9 @@ def main():
             success, elapsed, msg = run_single_test(
                 sniper_root, cfg_flags, trace_path, test_dir,
                 instruction_count, args.timeout,
+                userspace_mimicos=userspace_mimicos,
+                mimicos_binary=mimicos_binary,
+                mimicos_config=mimicos_config,
             )
 
             if success:

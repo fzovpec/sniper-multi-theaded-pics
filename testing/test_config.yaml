@@ -15,6 +15,11 @@ trace_suite:
     tracelists:
       - smoke_test.tlist
 
+  smoke_sift:
+    tracelist_base_path: "traces/"
+    tracelists:
+      - smoke_sift.tlist
+
 # ── Configs ─────────────────────────────────────────────────────────────────
 configs:
   configs_base_path: "../config/address_translation_schemes/"
@@ -56,20 +61,21 @@ configs:
       - "--perf_model/reserve_thp/target_fragmentation=1.0"
     description: "Baseline MMU with reserve_thp, no fragmentation (max large pages)"
 
-  # ── Fast detailed cache protocol variant ──
-  fast-detailed-frag0:
-    name: "fast-detailed-frag0.0"
-    file: "fast_detailed_baseline.cfg"
+  # ── Userspace MimicOS baseline ──
+  userspace-baseline-frag0:
+    name: "userspace-frag0.0"
+    file: "userspace_baseline.cfg"
     extends:
       - "--perf_model/reserve_thp/target_fragmentation=0.0"
-    description: "Fast-detailed cache protocol, reserve_thp, full fragmentation"
+    description: "Userspace MimicOS, reserve_thp, full fragmentation"
 
-  fast-detailed-frag1:
-    name: "fast-detailed-frag1.0"
-    file: "fast_detailed_baseline.cfg"
+  userspace-baseline-frag1:
+    name: "userspace-frag1.0"
+    file: "userspace_baseline.cfg"
     extends:
       - "--perf_model/reserve_thp/target_fragmentation=1.0"
-    description: "Fast-detailed cache protocol, reserve_thp, no fragmentation"
+    description: "Userspace MimicOS, reserve_thp, no fragmentation"
+
 
 # ── Experiment Suites ───────────────────────────────────────────────────────
 experiment_suites:
@@ -97,7 +103,7 @@ experiment_suites:
     instruction_count: 10000000
     description: "Sweep fragmentation 0.0 → 1.0 to validate THP promotion effects"
 
-  # Combined: all configs at once
+  # Combined: all trace-driven configs at once
   full_test:
     configs:
       - baseline-frag0
@@ -108,11 +114,17 @@ experiment_suites:
     instruction_count: 10000000
     description: "Full test suite: smoke + telemetry + frag sweep"
 
-  # Fast-detailed cache protocol (requires separate investigation)
-  fast_detailed_test:
+  # Userspace MimicOS: runs MimicOS as a native pinned process
+  # Requires: mimicos/build/startup_mimicos (run 'make -C mimicos' first)
+  # Requires: SIFT traces with .sift.vma files
+  userspace_mimicos_test:
     configs:
-      - fast-detailed-frag0
-      - fast-detailed-frag1
-    trace_suite: smoke
-    instruction_count: 10000000
-    description: "Fast-detailed cache protocol tests"
+      - userspace-baseline-frag0
+      - userspace-baseline-frag1
+    trace_suite: smoke_sift
+    instruction_count: 1000000
+    userspace_mimicos: true
+    mimicos_binary: "mimicos/build/startup_mimicos"
+    mimicos_config: "mimicos/configs/reservethp_32GB.ini"
+    description: "Userspace MimicOS smoke test with SIFT trace"
+
