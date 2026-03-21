@@ -7,7 +7,6 @@
 #include "memory_manager_base.h"
 
 #include "user_space_exception_handler.h"
-#include "thread.h"
 
 #include "debug_config.h"
 
@@ -98,7 +97,7 @@ void VirtuosExceptionHandler::handle_page_fault(FaultCtx &ctx)
                  " to ppn = "        << ppn  << std::endl;
 #endif
     
-    // TODO: @vlnitu add Swapping - migrate @kanellok's implementation from page_fault_handler.h [STALE]
+    // TODO:  add Swapping - migrate 's implementation from page_fault_handler.h [STALE]
 
     // 2. Update the page table with the frames that were already allocated by user-space MimicOS
     int core_id = m_core->getId();

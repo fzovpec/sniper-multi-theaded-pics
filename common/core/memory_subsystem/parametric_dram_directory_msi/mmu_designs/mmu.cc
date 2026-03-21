@@ -1,5 +1,5 @@
 // ============================================================================
-// @kanellok: MMU Implementation - Memory Management Unit for Sniper Simulator
+// MMU Implementation - Memory Management Unit for Sniper Simulator
 // ============================================================================
 //
 // This file implements the Memory Management Unit (MMU) for the Sniper
@@ -533,7 +533,7 @@ namespace ParametricDramDirectoryMSI
                 // For instruction fetches, only check iTLB or unified TLB
                 if (tlb_stores_instructions && instruction)
                 {
-                    // @kanellok: Passing the page table to the TLB lookup function is a legacy from the old TLB implementation. 
+                    // Passing the page table to the TLB lookup function is a legacy from the old TLB implementation. 
                     // It is not used in the current implementation.
 
                     tlb_block_info = tlbs[i][j]->lookup(address, time, count, lock, eip, modeled, count, page_table, true /* instruction */);
@@ -601,7 +601,7 @@ namespace ParametricDramDirectoryMSI
 
 
 
-		/* @kanellok: Tips and Hints:
+		/* Tips and Hints:
 		We performed the TLB lookup and we now need to decide what latency to charge based on whether we had a TLB hit or a TLB miss.
 		*/
         
@@ -658,7 +658,7 @@ namespace ParametricDramDirectoryMSI
                                  "ns at level " + std::to_string(hit_level));
                 }
 
-				// @kanellok: Page Size Prediction hit latency logic for L2 TLB hits
+				// Page Size Prediction hit latency logic for L2 TLB hits
 				// ================================================================
 				// L2 TLB (level 1) has special handling for page size prediction.
 				// Modern L2 TLBs store both 4KB and 2MB translations in separate
@@ -694,7 +694,7 @@ namespace ParametricDramDirectoryMSI
 
             // Advance simulation time by TLB latency
             // This ensures PTW (if any) starts after TLB lookup completes
-            // @kanellok: Be very careful if you want to play around with the timing model
+            // Be very careful if you want to play around with the timing model
             shmem_perf_model->setElapsedTime(ShmemPerfModel::_USER_THREAD, time + charged_tlb_latency); 
             mmu_log->debug("New time after charging TLB latency: " + 
                           std::to_string(shmem_perf_model->getElapsedTime(ShmemPerfModel::_USER_THREAD).getNS()) + "ns");
@@ -803,7 +803,7 @@ namespace ParametricDramDirectoryMSI
             // Determine page fault handling mode
             bool userspace_mimicos_enabled = Sim()->getMimicOS()->isUserspaceMimicosEnabled();
             
-            // @kanellok: restart_walk_after_fault is now false by default
+            // restart_walk_after_fault is now false by default
             // In sniper-space mode, faults are handled here and walk retried automatically
             bool restart_walk_after_fault = false;
             bool caused_page_fault = false;
@@ -877,13 +877,13 @@ namespace ParametricDramDirectoryMSI
             // Userspace MimicOS: Return to let kernel handle page fault
             // ----------------------------------------------------------------
             // In userspace mode, we don't handle faults in the simulator.
-            // Instead, return -1 to signal that a context switch to VirtuOS
+            // Instead, return -1 to signal that a context switch to userspace MimicOS
             // is needed to handle the page fault.
             if(caused_page_fault && userspace_mimicos_enabled)
             {
                 mmu_log->log("Page Fault in userspace mode - address " + mmu_log->hex(address) + 
                            " at time " + std::to_string(shmem_perf_model->getElapsedTime(ShmemPerfModel::_USER_THREAD).getNS()) + "ns");
-                mmu_log->log("Will trigger context switch to VirtuOS");
+                mmu_log->log("Will trigger context switch to userspace MimicOS");
 #if ENABLE_MMU_CSV_LOGS
                 if (count)
                 {

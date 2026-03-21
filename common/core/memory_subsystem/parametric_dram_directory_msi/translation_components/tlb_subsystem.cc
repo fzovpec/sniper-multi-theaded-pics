@@ -213,7 +213,7 @@ namespace ParametricDramDirectoryMSI
     }
 
     /*
-    @kanellokThis function predicts the page size based on the page size predictor.
+    This function predicts the page size based on the page size predictor.
      * If the page size predictor is not set, it returns 0 if no page sizes are configured,
      * otherwise it returns 12 (indicating a default page size of 4KB).
      *

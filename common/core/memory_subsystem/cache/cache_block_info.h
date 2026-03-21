@@ -39,10 +39,10 @@ public:
 										   // for different cache coherence protocols
 private:
 
-	// @kanellok for TLB: added ppn to store the physical page number
+	//  for TLB: added ppn to store the physical page number
 	IntPtr ppn;
-	bool m_tlb_entry;	  // @kanellok for caches that store TLB entries: flag to indicate if this is a TLB entry: this was used only in [Kanellopoulos et al. Victima MICRO 2023]
-	int m_page_size;	  //@kanellok for TLBs: hold page size for each cache block
+	bool m_tlb_entry;	  //  for caches that store TLB entries: flag to indicate if this is a TLB entry: this was used only in [Kanellopoulos et al. Victima MICRO 2023]
+	int m_page_size;	  // for TLBs: hold page size for each cache block
 
 	IntPtr m_tag;
 	CacheState::cstate_t m_cstate;
@@ -50,7 +50,7 @@ private:
 	BitsUsedType m_used;
 	UInt8 m_options; // large enough to hold a bitfield for all available option_t's
 	block_type_t m_block_type;
-	int m_reuse; //@kanellok tracking reuse
+	int m_reuse; // tracking reuse
 	int utilization;
 
 	static const char *option_names[];

@@ -198,14 +198,14 @@ void MimicOS::poll_for_signal()
         
         UInt64 bytes = (1 << 12);
 
-        // @kanellok@VTW25: For simplicity, we assume core_id = 0 for now
+        // For simplicity, we assume core_id = 0 for now
         // In a more complex scenario, we could extract core_id from the message or maintain per-core state
         // This would be useful in a multi-core simulation where different cores may have different memory access patterns
         // and we want to track allocations per core
         // For now, we keep it simple and use core_id = 0
         auto core_id = 0;
 
-        // @kanellok@VTW25: Allocate the requested number of frames
+        // Allocate the requested number of frames
         // The first frame is the data frame, the rest are page table frames
         // We use the physical memory allocator created during MimicOS initialization
         // If allocation fails, we print an error and exit
@@ -249,7 +249,7 @@ void MimicOS::poll_for_signal()
                 std::cout << frames[i] << std::endl;
             }
 #endif
-        // @kanellok@VTW25: Send the allocation results back to the SIFT-based application
+        // Send the allocation results back to the SIFT-based application
         // We reuse the same message structure to keep things simple
         // msg->argv[0] = exception_type_code (same as received)
         // msg->argv[1] = vpn (virtual page number)

@@ -6,7 +6,7 @@
 #include "physical_allocator/policies/reserve_thp_policy.h"           
 #include "physical_allocator/policies/baseline_allocator_policy.h"
 
-//@kanellok@VTW25: We include the relevant headers from sniper/include/ - we added the core 
+//We include the relevant headers from sniper/include/ - we added the core 
 // implementations of the allocators there to be accessible from both MimicOS and Sniper
 
 #include "memory_management/physical_memory_allocators/reserve_thp.h" 

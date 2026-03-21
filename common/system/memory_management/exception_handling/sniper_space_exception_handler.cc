@@ -50,7 +50,7 @@ void SniperExceptionHandler::handle_page_fault(FaultCtx &ctx)
 #endif
     int core_id = this->m_core->getId();
 
-    // TODO @vlnitu: migrate swapping...
+    // TODO migrate swapping...
     // bool is_swapped = false;
     // if(Sim()->getMimicOS()->isSwapEnabled()){
     //     // If the swap is enabled, we need to check if the page is in the swap space
@@ -120,7 +120,7 @@ void SniperExceptionHandler::allocate_page_table_frames(FaultCtx &ctx,
         frames.push_back(frame);
     }
 
-    // TODO @vlnitu: migrate virtualisation (is_guest)
+    // TODO migrate virtualisation (is_guest)
 
     // create a function update_page_table_frames that will update the page table frames
     int frames_used = update_page_table_frames(address, core_id, ppn, page_size, frames);

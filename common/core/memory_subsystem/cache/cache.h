@@ -51,7 +51,7 @@ private:
 	FaultInjector *m_fault_injector;
 
 	//unique ptr since there might be a bug that alters the page size list
-	std::unique_ptr<int[]> m_pagesizes; //@kanellok TLB supported page size vector
+	std::unique_ptr<int[]> m_pagesizes; // TLB supported page size vector
 	int m_number_of_page_sizes;
 	bool m_is_tlb;
 

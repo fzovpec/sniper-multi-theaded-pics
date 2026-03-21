@@ -73,7 +73,7 @@ namespace ParametricDramDirectoryMSI
                 m_log->log("After init os = ", (void*)os);
 
                 m_log->log("Before root->emulated_ppn");
-                // TODO @vlnitu: revert, but this will not work if there's only a single allocator in the sys, on VirtuOS side
+                // TODO revert, but this will not work if there's only a single allocator in the sys, on VirtuOS side
                 root->emulated_ppn = 0; // os->getMemoryAllocator()->handle_page_table_allocations(4096);
                 m_log->log("After root->emulated_ppn = ", root->emulated_ppn);
                 m_log->detailed("Root frame: ", (void*)root);
@@ -190,7 +190,7 @@ namespace ParametricDramDirectoryMSI
                                 if (count)
                                         stats.page_size_discovery[level - 1]++;
                                 m_log->detailed("Found translation for address: ", SimLog::hex(address), " with ppn: ", current_frame->entries[offset].data.translation.ppn, " at level: ", level, " with page size: ", m_page_size_list[level - 1]);
-                                // @kanellok: Be careful with the return values -> always return PPN_RESULT at page size granularity
+                                // Be careful with the return values -> always return PPN_RESULT at page size granularity
                                 ppn_result = current_frame->entries[offset].data.translation.ppn;
                                 LOG_ASSERT_ERROR(ppn_result != static_cast<IntPtr>(-1), "PPN is invalid");
                                
@@ -208,7 +208,7 @@ namespace ParametricDramDirectoryMSI
                                 {
                                         m_log->detailed("Next level is NULL, we need to allocate a new frame");
                                         if (restart_walk_after_fault) {
-                                                // TODO @vlnitu: remove code duplication, add it to a base function
+                                                // TODO remove code duplication, add it to a base function
                                                 bool userspace_mimicos_enabled = Sim()->getCfg()->getBool("general/enable_userspace_mimicos");
                                                 if (userspace_mimicos_enabled) {
                                                         std::cout << "[FATAL] [RADIX] VirtuOS resolved Page Fault before...\n" << 

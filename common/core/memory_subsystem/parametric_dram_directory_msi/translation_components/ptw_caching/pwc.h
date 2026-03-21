@@ -21,7 +21,7 @@ namespace ParametricDramDirectoryMSI
 		ComponentLatency access_latency;
 		ComponentLatency miss_latency;
 
-		Cache **m_cache; // @kanellok Cache PMLE4
+		Cache **m_cache; //  Cache PMLE4
 
 		UInt64 *m_access, *m_miss;
 		int num_caches;

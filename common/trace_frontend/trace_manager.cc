@@ -183,7 +183,7 @@ thread_id_t TraceManager::newThread(app_id_t app_id, bool first, bool init_fifo,
    std::cout << "[TraceManager] Number of Trace Threads in the system: " << m_threads.size()  << std::endl;
 #endif
 
-   /* @kanellok: If userspace MimicOS is enabled, we set the current SIFT reader to the Kernel SIFT reader
+   /* If userspace MimicOS is enabled, we set the current SIFT reader to the Kernel SIFT reader
       for the first thread of the first application, which is the MimicOS thread.
    */
 

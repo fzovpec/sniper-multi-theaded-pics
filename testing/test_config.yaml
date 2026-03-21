@@ -117,6 +117,10 @@ experiment_suites:
   # Userspace MimicOS: runs MimicOS as a native pinned process
   # Requires: mimicos/build/startup_mimicos (run 'make -C mimicos' first)
   # Requires: SIFT traces with .sift.vma files
+  # NOTE: Currently the SDE recorder's synchronous Magic() call for
+  # SimStartProcess deadlocks before the Sniper SIFT reader enters
+  # its main loop. The app trace is never loaded. This needs the SDE
+  # recorder to be rebuilt with the updated sim_api.h magic command IDs.
   userspace_mimicos_test:
     configs:
       - userspace-baseline-frag0

@@ -479,10 +479,10 @@ Cache::accessSingleLineTLB(IntPtr addr, access_t access_type,
 
 
 	for (int page_size = 0; page_size < m_number_of_page_sizes; page_size++)
-	{ // @kanellok iterate over all possible page sizes
+	{ //  iterate over all possible page sizes
 		int current_page_size = m_pagesizes[page_size];
 
-		splitAddressTLB(addr, tag, set_index, block_offset, current_page_size); //@kanellok provide the page size to find the index
+		splitAddressTLB(addr, tag, set_index, block_offset, current_page_size); // provide the page size to find the index
 		
 		set = m_sets[set_index];
 		// Use TLB-aware find that matches BOTH tag AND page_size
