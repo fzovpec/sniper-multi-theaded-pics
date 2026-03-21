@@ -13,6 +13,10 @@ LIBCARBON_OBJECTS = $(patsubst %.cpp,%.o,$(patsubst %.c,%.o,$(patsubst %.cc,%.o,
 
 INCLUDE_DIRECTORIES = $(DIRECTORIES) $(XED_HOME)/include/xed $(SIM_ROOT)/linux $(SIM_ROOT)/sift $(SIM_ROOT)/include $(SIM_ROOT)/decoder_lib
 
+# libtorch headers use -isystem to prevent collision between common/misc/semaphore.h
+# and the system POSIX semaphore.h (pulled in by C++20 <semaphore> via libtorch)
+TORCH_INCLUDES = -isystem $(SIM_ROOT)/libtorch/include -isystem $(SIM_ROOT)/libtorch/include/torch/csrc/api/include
+
 CLEAN=$(findstring clean,$(MAKECMDGOALS))
 
 ifeq ($(SNIPER_TARGET_ARCH),ia32)
@@ -47,9 +51,9 @@ endif
 
 # Assuming python3 include dir is within the gcc search path
 PYTHON_LD_LIBS := $(shell python3-config --libs --embed)
-LD_LIBS += -ldecoder -lsift -lxed -lrt -lz -lbz2 -llzma -lsqlite3 $(PYTHON_LD_LIBS)
+LD_LIBS += -ldecoder -lsift -lxed -lrt -lz -lbz2 -llzma -lsqlite3 $(PYTHON_LD_LIBS) -ltorch -lc10
 
-LD_FLAGS += -L$(SIM_ROOT)/lib -L$(SIM_ROOT)/decoder_lib/ -L$(SIM_ROOT)/sift -L$(XED_HOME)/lib
+LD_FLAGS += -L$(SIM_ROOT)/lib -L$(SIM_ROOT)/decoder_lib/ -L$(SIM_ROOT)/sift -L$(XED_HOME)/lib -L$(SIM_ROOT)/libtorch/lib
 
 ifneq ($(SQLITE_PATH),)
 	CPPFLAGS += -I$(SQLITE_PATH)/include
@@ -62,7 +66,8 @@ export LD_LIBRARY_PATH := $(SIM_ROOT)/lib:$(LD_LIBRARY_PATH)
 PYTHON_INCLUD_PATH := $(shell python3-config --includes)
 CPPFLAGS+=$(foreach dir,$(INCLUDE_DIRECTORIES),-I$(dir)) \
 	  $(PYTHON_INCLUD_PATH) \
-          -I$(SIM_ROOT)/capstone/include -I$(SIM_ROOT)/capstone/include/capstone 
+          -I$(SIM_ROOT)/capstone/include -I$(SIM_ROOT)/capstone/include/capstone \
+          $(TORCH_INCLUDES)
 
 CXXFLAGS+=-c \
           -Wall -Wextra -Wcast-align -Wno-unused-parameter -Wno-unknown-pragmas -std=c++20 -fno-strict-aliasing -D_GLIBCXX_USE_CXX11_ABI=0 $(OPT_CFLAGS) #-Werror

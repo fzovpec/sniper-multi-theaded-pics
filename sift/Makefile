@@ -32,7 +32,7 @@ CXXFLAGS+=-fPIC $(CXXFLAGS_ARCH)
 
 %.o : %.cc $(wildcard *.h)
 	$(_MSG) '[CXX   ]' $(subst $(shell readlink -f $(SIM_ROOT))/,,$(shell readlink -f $@))
-	$(_CMD) $(CXX) -c -o $@ $< $(CXXFLAGS)
+	$(_CMD) $(CXX) -c -o $@ $< $(CPPFLAGS) $(CXXFLAGS)
 
 $(TARGET) : $(OBJECTS)
 	$(_MSG) '[AR    ]' $(subst $(shell readlink -f $(SIM_ROOT))/,,$(shell readlink -f $@))
