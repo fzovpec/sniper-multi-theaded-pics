@@ -7,7 +7,7 @@
 #include "core.h"
 #include "sift_reader.h"
 #include "operand.h"
-#include "semaphore.h"
+#include "sniper_semaphore.h"
 
 #include <decoder.h>
 
