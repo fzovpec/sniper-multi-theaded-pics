@@ -132,8 +132,8 @@ namespace ParametricDramDirectoryMSI
                 // Start the walk from the root
                 PTFrame *current_frame = root;
 
-                IntPtr ppn_result;
-                IntPtr page_size_result;
+                IntPtr ppn_result = 0;
+                IntPtr page_size_result = 0;
 
                 int counter = 0; // Stores the depth of the pointer-chasing
                 int i = 0;               // Stores the page table id

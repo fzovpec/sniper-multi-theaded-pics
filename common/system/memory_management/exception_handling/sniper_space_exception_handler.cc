@@ -49,9 +49,6 @@ void SniperExceptionHandler::handle_page_fault(FaultCtx &ctx)
     std::cout << "[EXCEPTION_HANDLER] Handling page fault for address: " << (ctx.vpn << BASE_PAGE_SHIFT) << " in Sniper-space" << std::endl;
 #endif
     int core_id = this->m_core->getId();
-    Core *core_faulter = Sim()->getCoreManager()->getCoreFromID(core_id);
-    Thread *thread_faulter = core_faulter->getThread();
-    int app_id = thread_faulter->getAppId();
 
     // TODO @vlnitu: migrate swapping...
     // bool is_swapped = false;

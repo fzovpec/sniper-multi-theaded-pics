@@ -350,11 +350,11 @@ namespace ParametricDramDirectoryMSI
          // Timing experiment: tracks when the last prefetch completed
          SubsecondTime m_last_prefetch_completion;
 
-         // Flag: currently executing a speculative prefetch from the MMU
-         bool m_doing_spec_prefetch;
-
          ShmemPerfModel* m_shmem_perf_model;
          int metadata_passthrough_loc;
+
+         // Flag: currently executing a speculative prefetch from the MMU
+         bool m_doing_spec_prefetch;
 
          // Core-interfacing stuff
          void accessCache(

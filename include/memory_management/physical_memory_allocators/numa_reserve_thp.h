@@ -76,6 +76,8 @@ private:
     double m_target_frag_ratio = 1.0;
     UInt64 m_target_free_2mb_count = 0;
 
+    double threshold_for_promotion;
+
     // NUMA state
     UInt32 m_num_numa_nodes;
     NumaPlacementEngine m_placement_engine;
@@ -90,8 +92,6 @@ private:
     // Node 0 starts at PFN 1 (PFN 0 is reserved for root page table).
     std::vector<UInt64> m_per_node_kernel_next_pfn;
     std::vector<UInt64> m_per_node_kernel_end_pfn;
-
-    double threshold_for_promotion;
 
 public:
     Stats& getStats() { return stats; }

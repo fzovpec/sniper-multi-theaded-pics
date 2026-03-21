@@ -96,10 +96,6 @@ class TraceThread : public Runnable
       };
       std::unordered_map<ChampSimCacheKey, Instruction*, ChampSimCacheKeyHash> m_champsim_icache;
       
-      // ChampSim instruction cache statistics
-      UInt64 m_champsim_icache_hits;
-      UInt64 m_champsim_icache_misses;
-      
       UInt64 m_bbv_base;
       UInt64 m_bbv_count;
       UInt64 m_bbv_last;
@@ -117,6 +113,14 @@ class TraceThread : public Runnable
       bool m_blocked;
       bool m_cleanup;
       bool m_started;
+
+   public:
+      bool m_stopped;
+   private:
+
+      // ChampSim instruction cache statistics
+      UInt64 m_champsim_icache_hits;
+      UInt64 m_champsim_icache_misses;
 
       int fd_read;
       int fd_write;
@@ -199,9 +203,6 @@ class TraceThread : public Runnable
       { ((TraceThread*)arg)->handleRoutineAnnounceFunc(eip, name, imgname, offset, line, column, filename); }
       static int32_t __handleForkFunc(void* arg)
       { return ((TraceThread*)arg)->handleForkFunc();}
-
-      
-      bool m_stopped;
 
       TraceThread(Thread *thread, SubsecondTime time_start, String tracefile, String responsefile, app_id_t app_id, bool cleanup);
       ~TraceThread();
