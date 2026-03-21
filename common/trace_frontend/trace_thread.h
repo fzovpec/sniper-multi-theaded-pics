@@ -58,13 +58,48 @@ class TraceThread : public Runnable
       bool is_in_kernel_mode;
 
       bool m_trace_has_pa;
+      bool m_champsim_trace;
+      UInt32 m_champsim_access_size;
       bool m_address_randomization;
       bool m_appid_from_coreid;
       uint8_t m_address_randomization_table[256];
       bool m_stop;
       std::unordered_map<IntPtr, Instruction *> m_icache;
       std::unordered_map<IntPtr, const dl::DecodedInst *> m_decoder_cache;
-
+      
+      // ChampSim instruction cache: key is (PC, is_branch, num_src_regs, num_dest_regs, num_loads, num_stores)
+      // This allows reusing instructions when the same PC has the same operand signature
+      struct ChampSimCacheKey {
+         IntPtr pc;
+         uint8_t is_branch;
+         uint8_t num_src_regs;
+         uint8_t num_dest_regs;
+         uint8_t num_loads;
+         uint8_t num_stores;
+         
+         bool operator==(const ChampSimCacheKey& other) const {
+            return pc == other.pc && is_branch == other.is_branch &&
+                   num_src_regs == other.num_src_regs && num_dest_regs == other.num_dest_regs &&
+                   num_loads == other.num_loads && num_stores == other.num_stores;
+         }
+      };
+      struct ChampSimCacheKeyHash {
+         size_t operator()(const ChampSimCacheKey& k) const {
+            // Combine all fields into a hash
+            return std::hash<IntPtr>()(k.pc) ^ 
+                   (std::hash<uint8_t>()(k.is_branch) << 1) ^
+                   (std::hash<uint8_t>()(k.num_src_regs) << 2) ^
+                   (std::hash<uint8_t>()(k.num_dest_regs) << 3) ^
+                   (std::hash<uint8_t>()(k.num_loads) << 4) ^
+                   (std::hash<uint8_t>()(k.num_stores) << 5);
+         }
+      };
+      std::unordered_map<ChampSimCacheKey, Instruction*, ChampSimCacheKeyHash> m_champsim_icache;
+      
+      // ChampSim instruction cache statistics
+      UInt64 m_champsim_icache_hits;
+      UInt64 m_champsim_icache_misses;
+      
       UInt64 m_bbv_base;
       UInt64 m_bbv_count;
       UInt64 m_bbv_last;
@@ -77,7 +112,7 @@ class TraceThread : public Runnable
 
       String m_tracefile_kernel;
       String m_responsefile_kernel;
-
+      
       app_id_t m_app_id;
       bool m_blocked;
       bool m_cleanup;
@@ -88,7 +123,7 @@ class TraceThread : public Runnable
 
       // INVARIANT: to_be_replayed_inst.sinst != NULL iff thread->getCore()->getMemoryManager()->is_page_fault = True
       Sift::Instruction  to_be_replayed_inst;      // This is the instruction that is currently being replayed, if any
-      Sift::Instruction  to_be_replayed_next_inst;
+      Sift::Instruction  to_be_replayed_next_inst; 
 
       struct statistics
       {
@@ -97,7 +132,7 @@ class TraceThread : public Runnable
       // Make run() a function pointer which is initialized in the constructor
       typedef void (TraceThread::*RunFunc)();
       RunFunc m_current_run_func;
-
+      
       void run(){
          (this->*m_current_run_func)();
       }
@@ -120,19 +155,24 @@ class TraceThread : public Runnable
 
 
       Instruction* decode(Sift::Instruction &inst);
+      Instruction* decodeChampsim(Sift::Instruction &inst);
       void handleInstructionWarmup(Sift::Instruction &inst, Sift::Instruction &next_inst, Core *core, bool do_icache_warmup, UInt64 icache_warmup_addr, UInt64 icache_warmup_size);
+      void handleChampSimWarmup(Sift::Instruction &inst, Sift::Instruction &next_inst, Core *core);
       void handleInstructionDetailed(Sift::Instruction &inst, Sift::Instruction &next_inst, PerformanceModel *prfmdl);
+      void handleChampSimDetailed(Sift::Instruction &inst, Sift::Instruction &next_inst, PerformanceModel *prfmdl);
       void addDetailedMemoryInfo(DynamicInstruction *dynins, Sift::Instruction &inst, const dl::DecodedInst &decoded_inst, uint32_t mem_idx, Operand::Direction op_type, bool is_pretetch, PerformanceModel *prfmdl);
+      void addChampSimMemoryInfo(DynamicInstruction *dynins, UInt64 mem_address, Operand::Direction op_type, bool executed, bool is_prefetch, PerformanceModel *prfmdl);
       void unblock();
 
       SubsecondTime getCurrentTime() const;
+      
 
       dl::DecoderFactory *m_factory;  // we need a factory here to be able to create instructions of any kind
       const dl::DecodedInst* staticDecode(Sift::Instruction &inst);
 
       long long *m_papi_counters;
       bool m_virtuos_app;
-
+      
       Lock m_lock;
 
    public:
@@ -160,25 +200,7 @@ class TraceThread : public Runnable
       static int32_t __handleForkFunc(void* arg)
       { return ((TraceThread*)arg)->handleForkFunc();}
 
-
-      Instruction* decode(Sift::Instruction &inst);
-      void handleInstructionWarmup(Sift::Instruction &inst, Sift::Instruction &next_inst, Core *core, bool do_icache_warmup, UInt64 icache_warmup_addr, UInt64 icache_warmup_size);
-      void handleInstructionDetailed(Sift::Instruction &inst, Sift::Instruction &next_inst, PerformanceModel *prfmdl);
-      void addDetailedMemoryInfo(DynamicInstruction *dynins, Sift::Instruction &inst, const dl::DecodedInst &decoded_inst, uint32_t mem_idx, Operand::Direction op_type, bool is_pretetch, PerformanceModel *prfmdl);
-      void unblock();
-
-      SubsecondTime getCurrentTime() const;
-
-      dl::DecoderFactory *m_factory;  // we need a factory here to be able to create instructions of any kind
-      const dl::DecodedInst* staticDecode(Sift::Instruction &inst);
-
-      long long *m_papi_counters;
-
-      Lock m_lock;
-
-      void writeDIPs();
-
-   public:
+      
       bool m_stopped;
 
       TraceThread(Thread *thread, SubsecondTime time_start, String tracefile, String responsefile, app_id_t app_id, bool cleanup);
@@ -186,22 +208,24 @@ class TraceThread : public Runnable
 
       void spawn();
       void stop() { m_stop = true; }
+      void cleanupChampSimCache();  // Clean up ChampSim instruction cache to avoid leaks
       UInt64 getProgressExpect();
       UInt64 getProgressValue();
       void frontEndStop(); //Ask all trace_threads to send signal to front-end to shutdown
 
       Thread* getThread() const { return m_thread; }
       bool getVirtuosApp() { return m_virtuos_app; }
-
+     
       void handleAccessMemory(Core::lock_signal_t lock_signal, Core::mem_op_t mem_op_type, IntPtr d_addr, char* data_buffer, UInt32 data_size);
-
+      
       Sift::Reader* getSiftReader() { return &m_trace; }
-
+      
       Sift::Reader* getKernelSiftReader() { return m_kernel_trace; }
       void setKernelSIFTRreader(Sift::Reader *reader) { m_kernel_trace = reader; }
-
+         
       Sift::Reader* getAppSiftReader() { return m_app_trace; }
       void setAppSiftReader(Sift::Reader *reader) { m_app_trace = reader; }
+
 
       Sift::Reader* getCurrentSiftReader() { return m_current_sift_reader; }
       void setCurrentSiftReader(Sift::Reader *reader) { m_current_sift_reader = reader; }

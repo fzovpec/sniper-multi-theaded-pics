@@ -66,3 +66,8 @@
 
 // MPLRU cache replacement policy
 #define DEBUG_MPLRU                 DEBUG_NONE /* 0, 1 or 2 */ // MPLRU replacement policy logging
+
+// ChampSim trace frontend
+#define DEBUG_TRACE_CHAMPSIM        DEBUG_NONE /* 0, 1 or 2 */
+#define DEBUG_CHAMPSIM_CACHE        DEBUG_NONE /* 0, 1 or 2 */ // ChampSim instruction cache hits/misses
+#define DEBUG_DYNAMIC_MICROOP       DEBUG_NONE /* 0, 1 or 2 */ // DynamicMicroOp alloc/dealloc and refcount

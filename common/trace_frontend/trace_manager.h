@@ -60,7 +60,7 @@ class TraceManager
 
       friend class Monitor;
 
-      void setTraceReaderHandlers(Sift::Reader* reader, TraceThread* mimicos_trace_thread);
+      void setTraceReaderHandlers(Sift::Reader* reader, TraceThread* trace_thread);
 
    public:
       TraceManager();
@@ -72,6 +72,7 @@ class TraceManager
       void wait();
       void run();
       void cleanup();
+      void cleanupAllThreads();  // Clean up ChampSim caches on all trace threads
       void setupTraceFiles(int index);
       thread_id_t createThread(app_id_t app_id, SubsecondTime time, thread_id_t creator_thread_id);
       app_id_t createApplication(SubsecondTime time, thread_id_t creator_thread_id);
@@ -86,7 +87,7 @@ class TraceManager
 
       Sift::Reader *getKernelTraceReader() const { return m_kernel_trace_reader; }
       void setKernelTraceReader(Sift::Reader *reader) { m_kernel_trace_reader = reader; }
-
+      
       UInt64 getProgressExpect();
       UInt64 getProgressValue();
 };

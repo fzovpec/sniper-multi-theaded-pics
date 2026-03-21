@@ -67,13 +67,16 @@ void TraceManager::init()
 {
 #ifdef DEBUG
    std::cout << "TraceManager::init Function" << std::endl;
+#endif
+   // print threads
+#ifdef DEBUG
    std::cout << "Number of apps: " << m_num_apps << std::endl;
 #endif
    for (UInt32 app_id = 0; app_id < m_num_apps; app_id++)
    {
 #ifdef DEBUG
-   std::cout << "[TraceManager] init calls newThread for" <<
-   " app_id = " << app_id <<
+   std::cout << "[TraceManager] init calls newThread for" << 
+   " app_id = " << app_id << 
    " creator_thread_id = " << INVALID_THREAD_ID << std::endl;
 #endif
      newThread(app_id /*app_id*/, true /*first*/, false /*init_fifo*/, false /*spawn*/, SubsecondTime::Zero(), INVALID_THREAD_ID);
@@ -94,8 +97,8 @@ thread_id_t TraceManager::createThread(app_id_t app_id, SubsecondTime time, thre
    ScopedLock sl(m_lock);
 
 #ifdef DEBUG
-   std::cout << "[TraceManager] createThread calls newThread for" <<
-   " app_id = " << app_id <<
+   std::cout << "[TraceManager] createThread calls newThread for" << 
+   " app_id = " << app_id << 
    " creator_thread_id = " << creator_thread_id << std::endl;
 #endif
    return newThread(app_id, false /*first*/, true /*init_fifo*/, true /*spawn*/, time, creator_thread_id);
@@ -107,9 +110,9 @@ thread_id_t TraceManager::newThread(app_id_t app_id, bool first, bool init_fifo,
 
    assert(static_cast<decltype(app_id)>(m_num_apps) > app_id);
 
-   // Instantiate applications
+   // @hsongara: Instantiate applications
    // For non-virtualized environments:
-   // Create (only) one App Instance for the Host
+   // Create (only) one App Instance for the Host, this is the application running natively on the system
    // For virtualized environments:
    // Create one App Instance for the application in the VM, and one for the hypervisor application
 
@@ -130,6 +133,10 @@ thread_id_t TraceManager::newThread(app_id_t app_id, bool first, bool init_fifo,
      m_app_info[app_id].num_threads = 1;
      m_app_info[app_id].thread_count = 1;
 
+#ifdef DEBUG
+     // Print app_id, num_therads, thread_count using std::cout
+     std::cout << "[TraceManager] Creating FIRST thread for application " << app_id << " with thread count: " << m_app_info[app_id].thread_count << std::endl;
+#endif
      Sim()->getHooksManager()->callHooks(HookType::HOOK_APPLICATION_START, (UInt64)app_id);
      Sim()->getStatsManager()->logEvent(StatsManager::EVENT_APP_START, SubsecondTime::MaxTime(), INVALID_CORE_ID, INVALID_THREAD_ID, (UInt64)app_id, 0, "");
      thread_num = 0;
@@ -145,13 +152,25 @@ thread_id_t TraceManager::newThread(app_id_t app_id, bool first, bool init_fifo,
    {
      m_app_info[app_id].num_threads++;
      thread_num = m_app_info[app_id].thread_count++;
+#ifdef DEBUG
+     // Print app_id, num_therads, thread_count using std::cout
+     std::cout << "[TraceManager] Creating NEW thread for application " << app_id << " with thread count: " << m_app_info[app_id].thread_count << std::endl;
+#endif
    }
 
    if (init_fifo)
    {
      tracefile = getFifoName(app_id, thread_num, false /*response*/, true /*create*/);
-     if (m_responsefiles.size())
+#ifdef DEBUG
+     std::cout << "tracefile: " << tracefile << std::endl;
+#endif
+     if (m_responsefiles.size()){
        responsefile = getFifoName(app_id, thread_num, true /*response*/, true /*create*/);
+#ifdef DEBUG
+       std::cout << "responsefile: " << responsefile << std::endl;
+#endif
+     }
+
    }
 
    m_num_threads_running++;
@@ -159,25 +178,35 @@ thread_id_t TraceManager::newThread(app_id_t app_id, bool first, bool init_fifo,
    TraceThread *tthread = new TraceThread(thread, time, tracefile, responsefile, app_id, init_fifo /*cleaup*/);
    m_threads.push_back(tthread);
 
-   /* If userspace MimicOS is enabled, we set the current SIFT reader to the Kernel SIFT reader
+#ifdef DEBUG
+   std::cout << "[TraceManager] Trace Thread (tthread)'s current SiftReader is IDentified by name: " << tthread->getSiftReader()->getFilename() << std::endl;
+   std::cout << "[TraceManager] Number of Trace Threads in the system: " << m_threads.size()  << std::endl;
+#endif
+
+   /* @kanellok: If userspace MimicOS is enabled, we set the current SIFT reader to the Kernel SIFT reader
       for the first thread of the first application, which is the MimicOS thread.
    */
 
    bool userspace_mimicos_enabled = Sim()->getCfg()->getBool("general/enable_userspace_mimicos");
    if (app_id == 0 && thread_num == 0)
    {
-      // This is the first thread of the first application
+      // This is the first thread of the first application, set it as the MimicOS if userspace MimicOS is enabled
+      std::cout << "[TraceManager] Setting trace readers for the first application" << std::endl;
       if (userspace_mimicos_enabled) {
-         // Set it as the MimicOS thread
+         // This is the first thread of the first application, set it as the MimicOS thread
+         std::cout << "[TraceManager] Setting kernel trace reader for the first application" << std::endl;
          tthread->setKernelSIFTRreader(tthread->getSiftReader());
 
+         std::cout << "[TraceManager] Setting current trace reader for the first application as SIFT App Reader" << std::endl;
          // We set the current sift reader to the default trace reader which represents the MimicOS trace
          tthread->setCurrentSiftReader(tthread->getSiftReader());
+
 
          setKernelTraceReader(tthread->getSiftReader());
       }
       else {
          // Default path: set current sift reader to the main trace reader
+         // so that handleAccessMemory/getLength/getPosition work correctly
          tthread->setCurrentSiftReader(tthread->getSiftReader());
       }
    }
@@ -190,12 +219,20 @@ thread_id_t TraceManager::newThread(app_id_t app_id, bool first, bool init_fifo,
      tthread->spawn();
    }
 
+#ifdef DEBUG
+   std::cout << "[TraceManager] Thread with ThreadID = " << thread->getId() << " succesfully spawned" << std::endl;
+#endif
+
    return thread->getId();
 }
 
 app_id_t TraceManager::createApplication(SubsecondTime time, thread_id_t creator_thread_id)
 {
    ScopedLock sl(m_lock);
+
+#ifdef DEBUG
+   std::cout << "TraceManager creates new application: " << m_num_apps << std::endl;
+#endif
 
    app_id_t app_id = m_num_apps;
    m_num_apps++;
@@ -219,16 +256,20 @@ app_id_t TraceManager::createTraceBasedApplication(SubsecondTime time, char *tra
       std::cout << "[TraceManager] MimicOS creates trace-based application with trace file: " << trace << std::endl;
    }
 
+
    // Create a new Sift reader for the trace file - only MimicOS (app 0) can create trace-based applications
+#ifdef DEBUG
+   std::cout <<  "[TraceManager] Create a new SIFT trace reader (App) for the trace file" <<
+                 " - only MimicOS (app_id 0, thread_id = 0)" <<
+                 " can create trace-based applications" << std::endl;
+#endif
 
    Sift::Reader *app_trace_reader = new Sift::Reader(trace, "",(m_app_info[0].num_threads+1));
-   // Get a pointer to the trace thread that called this function
 
    // App 0 and Thread 0 are always the MimicOS thread
    TraceThread* mimicos_trace_thread = getTraceThread(0, creator_thread_id);
 
    setTraceReaderHandlers(app_trace_reader, mimicos_trace_thread);
-
    mimicos_trace_thread->setAppSiftReader(app_trace_reader);
 
    return 0;
@@ -240,6 +281,9 @@ void TraceManager::signalStarted()
 
 void TraceManager::signalDone(TraceThread *thread, SubsecondTime time, bool aborted)
 {
+#ifdef DEBUG
+   std::cout << "TraceManager::signalDone Function" << std::endl;
+#endif
    ScopedLock sl(m_lock);
 
    // Make sure threads don't call signalDone twice (once through endApplication,
@@ -315,6 +359,14 @@ void TraceManager::cleanup()
    m_num_apps_nonfinish = m_num_apps;
 }
 
+void TraceManager::cleanupAllThreads()
+{
+   std::cout << "[TraceManager] Cleaning up all trace threads" << std::endl;
+   // Clean up ChampSim instruction caches on all trace threads to avoid memory leaks
+   for (std::vector<TraceThread *>::iterator it = m_threads.begin(); it != m_threads.end(); ++it)
+     (*it)->cleanupChampSimCache();
+}
+
 TraceManager::~TraceManager()
 {
    cleanup();
@@ -337,7 +389,12 @@ void TraceManager::stop()
      (*it)->stop();
    // Give threads some time to end.
    sleep(1);
-
+   
+   // Clean up ChampSim instruction caches on all trace threads to avoid memory leaks
+   // (TraceThread destructors are never called because TraceManager is never deleted)
+   for (std::vector<TraceThread *>::iterator it = m_threads.begin(); it != m_threads.end(); ++it)
+     (*it)->cleanupChampSimCache();
+   
    // Some threads may be blocked (SIFT reader, syscall, etc.). Don't wait for them or we'll deadlock.
    m_done.signal();
    // Notify SIFT recorders that simulation is done,
@@ -358,8 +415,17 @@ void TraceManager::wait()
 
 void TraceManager::run()
 {
+#ifdef DEBUG
+   std::cout << "TraceManager::run Function" << std::endl;
+#endif
    start();
+#ifdef DEBUG
+   std::cout << "TraceManager::wait Function" << std::endl;
+#endif
    wait();
+#ifdef DEBUG
+   std::cout << "TraceManager::wait after Function" << std::endl;
+#endif
 }
 
 UInt64 TraceManager::getProgressExpect()
@@ -426,7 +492,7 @@ void TraceManager::Monitor::run()
    String threadName("trace-monitor");
    SimSetThreadName(threadName.c_str());
 
-   UInt32 n = 0;
+   UInt64 n = 0;
    while (true)
    {
      if (m_manager->m_num_threads_started > 0)
