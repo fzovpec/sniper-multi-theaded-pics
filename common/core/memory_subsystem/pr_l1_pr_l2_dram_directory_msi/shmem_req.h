@@ -23,6 +23,7 @@ namespace PrL1PrL2DramDirectoryMSI
          bool getWaitForData() const { return m_wait_for_data; }
          core_id_t getForwardingFrom() const { return m_forwarding_from; }
          bool isForwarding() const { return m_forwarding_from != INVALID_CORE_ID; }
+         CacheBlockInfo::block_type_t getBlockType() const { return m_shmem_msg->getBlockType(); }
 
          void setTime(SubsecondTime time) { m_time = time; }
          void updateTime(SubsecondTime time)

@@ -1,3 +1,4 @@
+#if HAS_LIBTORCH
 #ifndef NNBRANCHPREDICTOR_H
 #define NNBRANCHPREDICTOR_H
 
@@ -99,3 +100,4 @@ private:
 };
   
 #endif // NNBRANCHPREDICTOR_H
+#endif

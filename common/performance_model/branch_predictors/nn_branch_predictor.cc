@@ -1,3 +1,4 @@
+#if HAS_LIBTORCH
 #include "nn_branch_predictor.h"
 
 #include <torch/nn/cloneable.h>
@@ -111,3 +112,4 @@ void NNBranchPredictor::update(bool predicted, bool actual, bool indirect, IntPt
     }
     alternate_predictor->update(predicted, actual, indirect, ip, target);
 }
+#endif

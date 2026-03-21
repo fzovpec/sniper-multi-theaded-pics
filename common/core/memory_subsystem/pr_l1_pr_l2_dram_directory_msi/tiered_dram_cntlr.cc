@@ -14,7 +14,7 @@
 #include "stats.h"
 #include "shmem_perf.h"
 #include "log.h"
-#include "mimicos.h"
+// mimicos.h is part of a later patch series; NUMA node lookup uses static PFN-range fallback
 
 #include <cstring>
 
@@ -483,14 +483,7 @@ UInt32 TieredDramCntlr::getNumaNodeForAddress(IntPtr address) const
     
     UInt64 ppn = address >> 12;
     
-    // Primary: query the allocator via MimicOS (authoritative source of truth)
-    MimicOS* os = Sim()->getMimicOS();
-    if (os)
-    {
-        return os->getNumaNodeForPPN(ppn);
-    }
-    
-    // Fallback: static PFN-range lookup (used during early init before MimicOS exists)
+    // Static PFN-range lookup for NUMA node determination
     for (UInt32 n = 0; n < m_num_numa_nodes; ++n)
     {
         if (ppn >= m_numa_nodes[n].start_pfn && ppn < m_numa_nodes[n].end_pfn)
