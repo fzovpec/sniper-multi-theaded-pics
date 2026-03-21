@@ -17,9 +17,9 @@ def usage():
         '  [-c [objname:]<name[.cfg]>,<name2[.cfg]>,...]' + \
         '  [-c <sniper-options: section/key=value>]' + \
         '  [-s <script>]' + \
+        '  [--dev]' + \
         '  [--roi]' + \
         '  [--roi-script]' + \
-        '  [--pacsim]' + \
         '  [--viz]' + \
         '  [--viz-aso]' + \
         '  [--profile]' + \
@@ -36,6 +36,7 @@ def usage():
         '  [--power]' + \
         '  [--cache-only]' + \
         '  [--fast-forward]' + \
+        '  [--genstats]' + \
         '  [--no-cache-warming]' + \
         '  [--save-output]' + \
         '  [--save-patch]' + \
@@ -63,7 +64,6 @@ outputdir = '.'
 configfiles = []
 sniperoptions = []
 roi_only = False
-enable_pacsim = False
 roi_script = False
 sim_end = 'first'
 sim_end_valid = ('first', 'last', 'last-restart')
@@ -109,6 +109,8 @@ verbose = False
 use_pa = True
 use_pinplay = False
 sde_arch = ''
+genstats = True
+use_dev = False
 
 if not sys.argv[1:]:
   usage()
@@ -200,19 +202,20 @@ def va2pa_valid():
   else:
     return True
 
-record_trace_passthrough = [ 'pid-continue', 'stop-address=', 'frontend-option=', 'maxthreads=', 'pacsim' ]
+record_trace_passthrough = [ 'pid-continue', 'stop-address=', 'frontend-option=', 'maxthreads=' ]
 
 try:
   opts, cmdline = getopt.getopt(
     sys.argv[1:],
     "hvn:m:d:c:g:s:",
     [
+      "dev",
       "roi", "roi-script",
-      "pacsim",
       "viz", "viz-aso",
       "profile", "memory-profile", "cheetah",
       "perf", "valgrind", "wrap-sim=",
       "gdb", "gdb-wait", "gdb-quit",
+      "genstats",
       "appdebug", "appdebug-manual", "appdebug-enable",
       "follow-execv=",
       "power",
@@ -241,6 +244,8 @@ for o, a in opts:
     sys.exit()
   if o == '-v':
     verbose = True
+  if o == '--dev':
+    use_dev = True
   if o == '-n':
     ncores = int(a)
   if o == '-d':
@@ -265,17 +270,6 @@ for o, a in opts:
     roi_only = True
   if o == '--roi-script':
     roi_script = True
-  if o == "--pacsim":
-    sniperoptions.append('-g --general/inst_mode_init=fast_forward')
-    print("[PacSim]: enable region of interest (roi) only.")
-    roi_only = True
-    use_sift = True
-    enable_pacsim = True
-    #verbose = True
-    #sniperoptions.append('--roi')
-    #sniperoptions.append('--sift')
-    #sniperoptions.append('--v')
-
   if o == '--sim-end':
     if a not in sim_end_valid:
       print('--sim-end value', a, 'invalid, need one of', sim_end_valid, file=sys.stderr)
@@ -377,6 +371,8 @@ for o, a in opts:
     use_sift = True
   if o == '--sde-arch':
     sde_arch = a
+  if o == '--genstats':
+    genstats = True
   if o.startswith('--') and o[2:] in record_trace_passthrough:
     trace_extra_args.append(o)
   if o.startswith('--') and o[2:]+'=' in record_trace_passthrough:
@@ -665,10 +661,7 @@ if tracegen:
   if sde_arch:
     trace_extra_args += [ '--sde-arch=%(sde_arch)s' % locals() ]
   for app_id, (pre_cmd, app_cmd) in enumerate(applications):
-    tracecmd = pre_cmd + [ os.path.join(HOME, 'record-trace'), '-o', traceprefix ]
-    if enable_pacsim:
-        tracecmd += ['--pacsim'] 
-    tracecmd += (['-v'] if verbose else []) + trace_extra_args + app_cmd
+    tracecmd = pre_cmd + [ os.path.join(HOME, 'record-trace'), '-o', traceprefix ] + (['-v'] if verbose else []) + trace_extra_args + app_cmd
     tracecmds.append(tracecmd)
     if tracegen['redirect']: # redirect output
       threading.Thread(target = run_sniper.run_program_redirect, args = (app_id, run_sift_recorder, tracecmd, outputdir)).start()
@@ -767,12 +760,14 @@ if standalone:
       f.write(' quit\n')
       f.write('end\n')
     f.close()
-    gdbcmd = 'gdb -quiet --command=%(fn)s %(HOME)s/lib/sniper --args ' % locals()
+    sniper_bin = 'sniper_dev' if use_dev else 'sniper'
+    gdbcmd = 'gdb -quiet --command=%(fn)s %(HOME)s/lib/%(sniper_bin)s --args ' % locals()
   elif use_wrap_sim:
     gdbcmd = '%(use_wrap_sim)s ' % locals()
   else:
     gdbcmd = ''
-  cmd = gdbcmd + '%(HOME)s/lib/sniper' % locals() + optcmd
+  sniper_bin = 'sniper_dev' if use_dev else 'sniper'
+  cmd = gdbcmd + '%(HOME)s/lib/%(sniper_bin)s' % locals() + optcmd
 else:
   if follow_execv:
     pintool = 'follow_execv'
@@ -837,8 +832,32 @@ def execute():
       pass
     return 9
 
-  rc >>= 8
-  return rc
+  # Decode the wait status properly
+  if os.WIFSIGNALED(rc):
+    # Process was killed by a signal
+    signum = os.WTERMSIG(rc)
+    signal_names = {
+      1: 'SIGHUP', 2: 'SIGINT', 3: 'SIGQUIT', 4: 'SIGILL',
+      6: 'SIGABRT', 8: 'SIGFPE', 9: 'SIGKILL', 11: 'SIGSEGV',
+      13: 'SIGPIPE', 14: 'SIGALRM', 15: 'SIGTERM'
+    }
+    signame = signal_names.get(signum, 'signal %d' % signum)
+    print('[SNIPER] ERROR: Process killed by %s (signal %d)' % (signame, signum))
+    if signum == 9:
+      print('[SNIPER] SIGKILL often indicates Out-Of-Memory (OOM) killer terminated the process.')
+      print('[SNIPER] Check: dmesg | grep -i "killed process" or /var/log/kern.log')
+    elif signum == 11:
+      print('[SNIPER] SIGSEGV indicates a segmentation fault (memory access error).')
+    elif signum == 6:
+      print('[SNIPER] SIGABRT indicates the process aborted (assertion failure or abort() call).')
+    return 128 + signum  # Standard convention for signal-killed processes
+  elif os.WIFEXITED(rc):
+    # Process exited normally
+    return os.WEXITSTATUS(rc)
+  else:
+    # Unknown status
+    print('[SNIPER] WARNING: Unknown process termination status: %d' % rc)
+    return rc >> 8
 
 def execute_appdebug():
   if verbose:
@@ -914,16 +933,7 @@ stopping = True
 t_end = time.time()
 t_elapsed = t_end - t_start
 print('[SNIPER] End')
-#if enable_pacsim:
-    
-#    print('[SNIPER] Elapsed time:', '%.02f' % t_elapsed, 'seconds')
-#else:
 print('[SNIPER] Elapsed time:', '%.02f' % t_elapsed, 'seconds')
-import pacsim 
-
-if enable_pacsim:
-    info = pacsim.get_sim_time("./")
-    print(info)
 
 if tracegen:
   # If we get here, there might still be some front-end processes running (maybe a deadlocked sift recorder trace?). If so, kill those processes
@@ -959,11 +969,44 @@ elif os.path.exists(os.path.join(outputdir, 'sim.cfg')):
     print('[SNIPER] Generating visualization in viz/')
     os.system('%(sim_root)s/tools/viz/viz.py %(use_viz_mcpat)s %(use_viz_profile)s %(use_viz_aso)s -d %(outputdir)s -o %(outputdir)s/viz >/dev/null' % locals())
 
+  if genstats:
+    print('[SNIPER] Generating statistics')
+    os.system('%(sim_root)s/tools/dumpstats.py -d %(outputdir)s > %(outputdir)s/sim.stats' % locals())
+
   if use_viz_aso and not use_viz:
     print('[SNIPER] Generating ASO visualization in viz/levels/functionbased/')
     os.system('%(sim_root)s/tools/viz/functionbased.py -d %(outputdir)s -o %(outputdir)s/viz >/dev/null' % locals())
 
   gen_simout.generate_simout(resultsdir = outputdir, output = open(os.path.join(outputdir, 'sim.out'), 'w'), silent = True)
+
+  # Organize output files into subdirectories
+  print('[SNIPER] Organizing output files')
+  import glob
+  import shutil
+  
+  # Create subdirectories
+  logs_dir = os.path.join(outputdir, 'logs')
+  telemetry_dir = os.path.join(outputdir, 'telemetry')
+  simulation_dir = os.path.join(outputdir, 'simulation')
+  
+  for subdir in [logs_dir, telemetry_dir, simulation_dir]:
+    if not os.path.exists(subdir):
+      os.makedirs(subdir)
+  
+  # Move files containing "log" in their name to logs/
+  for logfile in glob.glob(os.path.join(outputdir, '*log*')):
+    if os.path.isfile(logfile):
+      shutil.move(logfile, os.path.join(logs_dir, os.path.basename(logfile)))
+  
+  # Move *.csv files to telemetry/
+  for csvfile in glob.glob(os.path.join(outputdir, '*.csv')):
+    if os.path.isfile(csvfile):
+      shutil.move(csvfile, os.path.join(telemetry_dir, os.path.basename(csvfile)))
+  
+  # Move sim.* files to simulation/
+  for simfile in glob.glob(os.path.join(outputdir, 'sim.*')):
+    if os.path.isfile(simfile):
+      shutil.move(simfile, os.path.join(simulation_dir, os.path.basename(simfile)))
 
 
 stats = dict(

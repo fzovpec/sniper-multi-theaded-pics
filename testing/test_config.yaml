@@ -1,0 +1,118 @@
+# Sniper Upstream Test Configurations
+# =====================================
+# Smoke tests and sweeps for the MMU + memory management stack.
+# Usage:
+#   python3 create_experiments.py \
+#     --artifact-path <path-to-snipersim-parent> \
+#     --yaml testing/test_config.yaml \
+#     --suite <suite_name> \
+#     --suite-dir-name <output_name>
+
+# ── Traces ──────────────────────────────────────────────────────────────────
+trace_suite:
+  smoke:
+    tracelist_base_path: "traces/"
+    tracelists:
+      - smoke_test.tlist
+
+# ── Configs ─────────────────────────────────────────────────────────────────
+configs:
+  configs_base_path: "../config/address_translation_schemes/"
+
+  # ── (i) Baseline with reserve_thp, frag=0.0 (full fragmentation → all 4KB) ──
+  baseline-frag0:
+    name: "baseline-frag0.0"
+    file: "baseline.cfg"
+    extends:
+      - "--perf_model/reserve_thp/target_fragmentation=0.0"
+    description: "Baseline MMU with reserve_thp, full fragmentation (no large pages)"
+
+  # ── (i) Same but with detailed telemetry enabled ──
+  # NOTE: For per-access CSV logs, rebuild with ENABLE_MMU_CSV_LOGS=1 in
+  # include/debug_config.h.  The --genstats flag (already in create_experiments.py)
+  # always writes aggregate MMU stats to sim.stats (mmu_walker.*, tlb.*, etc.).
+  baseline-frag0-telemetry:
+    name: "baseline-frag0.0-telemetry"
+    file: "baseline.cfg"
+    extends:
+      - "--perf_model/reserve_thp/target_fragmentation=0.0"
+    description: "Baseline MMU with reserve_thp, frag=0.0 (rebuild with ENABLE_MMU_CSV_LOGS=1 for per-access CSV)"
+
+  # ── (ii) Fragmentation sweep ──
+  fragmentation-sweep:
+    name: "frag-sweep"
+    file: "baseline.cfg"
+    sweeps:
+      - identifier: ["frag"]
+        option: ["--perf_model/reserve_thp/target_fragmentation="]
+        values: [[0.0, 0.25, 0.5, 0.75, 1.0]]
+    description: "Reserve THP fragmentation sweep: 0% → 100% large page availability"
+
+  # ── Baseline with frag=1.0 (no fragmentation → all large pages) ──
+  baseline-frag1:
+    name: "baseline-frag1.0"
+    file: "baseline.cfg"
+    extends:
+      - "--perf_model/reserve_thp/target_fragmentation=1.0"
+    description: "Baseline MMU with reserve_thp, no fragmentation (max large pages)"
+
+  # ── Fast detailed cache protocol variant ──
+  fast-detailed-frag0:
+    name: "fast-detailed-frag0.0"
+    file: "fast_detailed_baseline.cfg"
+    extends:
+      - "--perf_model/reserve_thp/target_fragmentation=0.0"
+    description: "Fast-detailed cache protocol, reserve_thp, full fragmentation"
+
+  fast-detailed-frag1:
+    name: "fast-detailed-frag1.0"
+    file: "fast_detailed_baseline.cfg"
+    extends:
+      - "--perf_model/reserve_thp/target_fragmentation=1.0"
+    description: "Fast-detailed cache protocol, reserve_thp, no fragmentation"
+
+# ── Experiment Suites ───────────────────────────────────────────────────────
+experiment_suites:
+  # (i) Basic smoke test: MMU correctness with frag=0.0
+  smoke_test:
+    configs:
+      - baseline-frag0
+    trace_suite: smoke
+    instruction_count: 10000000
+    description: "Quick 10M-instr smoke test with baseline MMU + frag=0.0"
+
+  # (i) MMU with detailed telemetry
+  mmu_telemetry:
+    configs:
+      - baseline-frag0-telemetry
+    trace_suite: smoke
+    instruction_count: 10000000
+    description: "MMU telemetry test: CSV logs for TLB, PTW, page fault stats"
+
+  # (ii) Fragmentation sweep
+  fragmentation_sweep:
+    configs:
+      - fragmentation-sweep
+    trace_suite: smoke
+    instruction_count: 10000000
+    description: "Sweep fragmentation 0.0 → 1.0 to validate THP promotion effects"
+
+  # Combined: all configs at once
+  full_test:
+    configs:
+      - baseline-frag0
+      - baseline-frag0-telemetry
+      - baseline-frag1
+      - fragmentation-sweep
+    trace_suite: smoke
+    instruction_count: 10000000
+    description: "Full test suite: smoke + telemetry + frag sweep"
+
+  # Fast-detailed cache protocol (requires separate investigation)
+  fast_detailed_test:
+    configs:
+      - fast-detailed-frag0
+      - fast-detailed-frag1
+    trace_suite: smoke
+    instruction_count: 10000000
+    description: "Fast-detailed cache protocol tests"

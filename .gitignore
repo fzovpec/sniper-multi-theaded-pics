@@ -96,3 +96,9 @@ graphite-*.tar.bz2
 .cache
 tags
 compile_commands.json
+# Symlinked SIFT files
+frontend/pin-frontend/sift/*.h
+frontend/pin-frontend/sift/*.cc
+sift/recorder/sift/*.h
+sift/recorder/sift/*.cc
+testing/test_results/

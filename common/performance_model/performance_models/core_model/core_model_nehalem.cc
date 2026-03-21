@@ -139,9 +139,10 @@ CoreModelNehalem::CoreModelNehalem()
 
 unsigned int CoreModelNehalem::getInstructionLatency(const MicroOp *uop) const
 {
-   xed_iclass_enum_t instruction_type = (xed_iclass_enum_t) uop->getInstructionOpcode();
-   LOG_ASSERT_ERROR(instruction_type >= 0 && instruction_type < XED_ICLASS_LAST, "Invalid instruction type %d", instruction_type);
-   return instructionLatencies[instruction_type];
+   unsigned int opcode = uop->getInstructionOpcode();
+   if (opcode >= XED_ICLASS_LAST)
+      return 1; // Unknown iclass: assume 1-cycle latency
+   return instructionLatencies[opcode];
 }
 
 unsigned int CoreModelNehalem::getAluLatency(const MicroOp *uop) const
