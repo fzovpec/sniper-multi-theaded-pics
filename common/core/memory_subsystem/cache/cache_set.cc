@@ -7,6 +7,8 @@
 #include "cache_set_random.h"
 #include "cache_set_round_robin.h"
 #include "cache_set_srrip.h"
+#include "cache_set_mplru.h"
+#include "cache_set_chirp.h"
 #include "cache_base.h"
 #include "log.h"
 #include "simulator.h"
@@ -14,8 +16,8 @@
 #include "config.hpp"
 
 CacheSet::CacheSet(CacheBase::cache_t cache_type,
-      UInt32 associativity, UInt32 blocksize):
-      m_associativity(associativity), m_blocksize(blocksize)
+      UInt32 associativity, UInt32 blocksize, bool is_tlb_set):
+      m_associativity(associativity), m_blocksize(blocksize), m_is_tlb_set(is_tlb_set), inserts(0), evictions(0), invalidations(0)
 {
    m_cache_block_info_array = new CacheBlockInfo*[m_associativity];
    for (UInt32 i = 0; i < m_associativity; i++)
@@ -68,7 +70,7 @@ CacheSet::write_line(UInt32 line_index, UInt32 offset, Byte *in_buff, UInt32 byt
 
 CacheBlockInfo*
 CacheSet::find(IntPtr tag, UInt32* line_index)
-{
+{ 
    for (SInt32 index = m_associativity-1; index >= 0; index--)
    {
       if (m_cache_block_info_array[index]->getTag() == tag)
@@ -81,6 +83,45 @@ CacheSet::find(IntPtr tag, UInt32* line_index)
    return NULL;
 }
 
+CacheBlockInfo*
+CacheSet::findTLB(IntPtr tag, int page_size, UInt32* line_index)
+{
+   // TLB-aware find: match BOTH tag AND page_size to avoid false matches
+   // between entries from different page sizes (e.g., 4KB vs 2MB)
+   for (SInt32 index = m_associativity-1; index >= 0; index--)
+   {
+      CacheBlockInfo* block = m_cache_block_info_array[index];
+      if (block->getTag() == tag && block->getPageSize() == page_size)
+      {
+         if (line_index != NULL)
+            *line_index = index;
+         return block;
+      }
+   }
+   return NULL;
+}
+
+bool
+CacheSet::invalidateTLB(IntPtr tag, int page_size)
+{
+   // TLB-aware invalidate: match BOTH tag AND page_size
+   // This prevents invalidating entries from different page sizes that happen
+   // to have the same tag (which maps to different VPNs)
+   bool found_any = false;
+   for (SInt32 index = m_associativity-1; index >= 0; index--)
+   {
+      CacheBlockInfo* block = m_cache_block_info_array[index];
+      if (block->getTag() == tag && block->getPageSize() == page_size)
+      {
+         block->invalidate();
+         invalidations++;
+         found_any = true;
+         // Continue to invalidate ALL matching entries (in case of duplicates)
+      }
+   }
+   return found_any;
+}
+
 bool
 CacheSet::invalidate(IntPtr& tag)
 {
@@ -89,7 +130,9 @@ CacheSet::invalidate(IntPtr& tag)
       if (m_cache_block_info_array[index]->getTag() == tag)
       {
          m_cache_block_info_array[index]->invalidate();
+
          return true;
+         invalidations++;
       }
    }
    return false;
@@ -101,17 +144,24 @@ CacheSet::insert(CacheBlockInfo* cache_block_info, Byte* fill_buff, bool* evicti
    // This replacement strategy does not take into account the fact that
    // cache blocks can be voluntarily flushed or invalidated due to another write request
    const UInt32 index = getReplacementIndex(cntlr);
+
    assert(index < m_associativity);
 
    assert(eviction != NULL);
+   
 
    if (m_cache_block_info_array[index]->isValid())
    {
+
+
       *eviction = true;
       // FIXME: This is a hack. I dont know if this is the best way to do
       evict_block_info->clone(m_cache_block_info_array[index]);
-      if (evict_buff != NULL && m_blocks != NULL)
+      if (evict_buff != NULL && m_blocks != NULL){
          memcpy((void*) evict_buff, &m_blocks[index * m_blocksize], m_blocksize);
+      }
+      evictions++;
+
    }
    else
    {
@@ -121,8 +171,11 @@ CacheSet::insert(CacheBlockInfo* cache_block_info, Byte* fill_buff, bool* evicti
    // FIXME: This is a hack. I dont know if this is the best way to do
    m_cache_block_info_array[index]->clone(cache_block_info);
 
+
    if (fill_buff != NULL && m_blocks != NULL)
       memcpy(&m_blocks[index * m_blocksize], (void*) fill_buff, m_blocksize);
+   
+   inserts++;
 }
 
 char*
@@ -135,36 +188,42 @@ CacheSet*
 CacheSet::createCacheSet(String cfgname, core_id_t core_id,
       String replacement_policy,
       CacheBase::cache_t cache_type,
-      UInt32 associativity, UInt32 blocksize, CacheSetInfo* set_info)
+      UInt32 associativity, UInt32 blocksize, CacheSetInfo* set_info, bool is_tlb_set)
 {
    CacheBase::ReplacementPolicy policy = parsePolicyType(replacement_policy);
    switch(policy)
    {
       case CacheBase::ROUND_ROBIN:
-         return new CacheSetRoundRobin(cache_type, associativity, blocksize);
+         return new CacheSetRoundRobin(cache_type, associativity, blocksize, is_tlb_set);
 
       case CacheBase::LRU:
       case CacheBase::LRU_QBS:
-         return new CacheSetLRU(cache_type, associativity, blocksize, dynamic_cast<CacheSetInfoLRU*>(set_info), getNumQBSAttempts(policy, cfgname, core_id));
+         return new CacheSetLRU(cache_type, associativity, blocksize, dynamic_cast<CacheSetInfoLRU*>(set_info), getNumQBSAttempts(policy, cfgname, core_id), is_tlb_set);
 
       case CacheBase::NRU:
-         return new CacheSetNRU(cache_type, associativity, blocksize);
+         return new CacheSetNRU(cache_type, associativity, blocksize, is_tlb_set);
 
       case CacheBase::MRU:
-         return new CacheSetMRU(cache_type, associativity, blocksize);
+         return new CacheSetMRU(cache_type, associativity, blocksize, is_tlb_set);
 
       case CacheBase::NMRU:
-         return new CacheSetNMRU(cache_type, associativity, blocksize);
+         return new CacheSetNMRU(cache_type, associativity, blocksize, is_tlb_set);
 
       case CacheBase::PLRU:
-         return new CacheSetPLRU(cache_type, associativity, blocksize);
+         return new CacheSetPLRU(cache_type, associativity, blocksize, is_tlb_set);
 
       case CacheBase::SRRIP:
       case CacheBase::SRRIP_QBS:
-         return new CacheSetSRRIP(cfgname, core_id, cache_type, associativity, blocksize, dynamic_cast<CacheSetInfoLRU*>(set_info), getNumQBSAttempts(policy, cfgname, core_id));
+         return new CacheSetSRRIP(cfgname, core_id, cache_type, associativity, blocksize, dynamic_cast<CacheSetInfoLRU*>(set_info), getNumQBSAttempts(policy, cfgname, core_id), is_tlb_set);
 
       case CacheBase::RANDOM:
-         return new CacheSetRandom(cache_type, associativity, blocksize);
+         return new CacheSetRandom(cache_type, associativity, blocksize, is_tlb_set);
+
+      case CacheBase::MPLRU:
+         return new CacheSetMPLRU(cache_type, associativity, blocksize, dynamic_cast<CacheSetInfoMPLRU*>(set_info), 1, is_tlb_set);
+
+      case CacheBase::CHIRP:
+         return new CacheSetCHiRP(cache_type, associativity, blocksize, dynamic_cast<CacheSetInfoCHiRP*>(set_info), is_tlb_set);
 
       default:
          LOG_PRINT_ERROR("Unrecognized Cache Replacement Policy: %i",
@@ -186,6 +245,16 @@ CacheSet::createCacheSetInfo(String name, String cfgname, core_id_t core_id, Str
       case CacheBase::SRRIP:
       case CacheBase::SRRIP_QBS:
          return new CacheSetInfoLRU(name, cfgname, core_id, associativity, getNumQBSAttempts(policy, cfgname, core_id));
+      case CacheBase::MPLRU:
+         return new CacheSetInfoMPLRU(name, cfgname, core_id, associativity, 1);
+      case CacheBase::CHIRP:
+      {
+         UInt32 table_size = Sim()->getCfg()->hasKey(cfgname + "/chirp/table_size")
+            ? Sim()->getCfg()->getInt(cfgname + "/chirp/table_size") : 1024;
+         UInt8 threshold = Sim()->getCfg()->hasKey(cfgname + "/chirp/threshold")
+            ? Sim()->getCfg()->getInt(cfgname + "/chirp/threshold") : 2;
+         return new CacheSetInfoCHiRP(name, cfgname, core_id, associativity, table_size, threshold);
+      }
       default:
          return NULL;
    }
@@ -227,6 +296,10 @@ CacheSet::parsePolicyType(String policy)
       return CacheBase::SRRIP_QBS;
    if (policy == "random")
       return CacheBase::RANDOM;
+   if (policy == "mplru")
+      return CacheBase::MPLRU;
+   if (policy == "chirp")
+      return CacheBase::CHIRP;
 
    LOG_PRINT_ERROR("Unknown replacement policy %s", policy.c_str());
 }
@@ -241,4 +314,37 @@ bool CacheSet::isValidReplacement(UInt32 index)
    {
       return true;
    }
+}
+
+uint64_t CacheSet::countPageWalkCacheBlocks()
+{
+   uint64_t count = 0;
+   for (SInt32 index = m_associativity - 1; index >= 0; index--)
+   {
+      if (m_cache_block_info_array[index]->isPageTableBlock())
+      {
+         count++;
+      }
+   }
+   return count;
+}
+// All legacy metadata counting functions now use countPageWalkCacheBlocks()
+uint64_t CacheSet::countSecurityCacheBlocks()
+{
+   return countPageWalkCacheBlocks();
+}
+uint64_t CacheSet::countExpressiveCacheBlocks()
+{
+   return countPageWalkCacheBlocks();
+}
+
+uint64_t CacheSet::countUtopiaCacheBlocks()
+{
+   return countPageWalkCacheBlocks();
+}
+
+
+uint64_t CacheSet::countTLBCacheBlocks()
+{
+   return countPageWalkCacheBlocks();
 }

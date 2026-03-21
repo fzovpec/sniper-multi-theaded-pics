@@ -626,6 +626,9 @@ namespace ParametricDramDirectoryMSI
 
 		HitWhere::where_t hit_where = HitWhere::MISS;
 
+		// No shadow cache in this configuration
+		void *shadow_cache = nullptr;
+
 		// Check if this is any type of metadata request using the helper function
 		bool metadata_request = CacheBlockInfo::isMetadataBlockType(block_type);
 

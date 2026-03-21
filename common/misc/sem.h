@@ -1,27 +1,4 @@
-#ifndef __SEMAPHORE_H__
-#define __SEMAPHORE_H__
-
-#include "lock.h"
-
-class Semaphore
-{
-   private:
-      int _count;
-      int _numWaiting;
-      int _futx;
-      Lock _lock;
-
-   public:
-      Semaphore(int count);
-      Semaphore();
-      ~Semaphore();
-
-      void wait();
-      void signal();
-      void broadcast();
-};
-
+/* Forwarding header — canonical definition is in sniper_semaphore.h */
+#ifndef __SNIPER_SEMAPHORE_H__
+#include "sniper_semaphore.h"
 #endif
-
-
-

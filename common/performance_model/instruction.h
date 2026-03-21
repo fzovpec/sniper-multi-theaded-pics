@@ -32,12 +32,13 @@ enum InstructionType
    INST_TLB_MISS,
    INST_MEM_ACCESS, // Not a regular memory access.  These are added latencies and do not correspond to a particular instruction.  Dynamic Instruction
    INST_DELAY,
+   INST_PAGEFAULT,
    INST_UNKNOWN,
    MAX_INSTRUCTION_COUNT
 };
 
-__attribute__((unused)) static const char *INSTRUCTION_NAMES[] =
-    {"generic", "add", "sub", "mul", "div", "fadd", "fsub", "fmul", "fdiv", "jmp", "branch", "dynamic_misc", "recv", "sync", "spawn", "tlb_miss", "mem_access", "delay", "unknown"};
+__attribute__ ((unused)) static const char * INSTRUCTION_NAMES [] =
+{"generic","add","sub","mul","div","fadd","fsub","fmul","fdiv","jmp","branch", "dynamic_misc","recv","sync","spawn","tlb_miss","mem_access","delay","pagefault","unknown"};
 
 class Instruction
 {
@@ -248,6 +249,15 @@ public:
    {
    }
    bool isIfetch() const { return m_is_ifetch; }
+};
+
+class PageFaultRoutineInstruction : public PseudoInstruction
+{
+   bool m_is_fence;
+public:
+   PageFaultRoutineInstruction(SubsecondTime cost)
+      : PseudoInstruction(cost, INST_PAGEFAULT), m_is_fence(true) {}
+      bool isFence() const { return m_is_fence; }
 };
 
 class MemAccessInstruction : public PseudoInstruction

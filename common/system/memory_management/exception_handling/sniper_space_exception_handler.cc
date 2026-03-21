@@ -1,5 +1,9 @@
 
 #include "sniper_space_exception_handler.h"
+#include "core.h"
+#include "simulator.h"
+#include "mimicos.h"
+#include "memory_management/physical_memory_allocators/physical_memory_allocator.h"
 #include "thread.h"
 #include "debug_config.h"
 

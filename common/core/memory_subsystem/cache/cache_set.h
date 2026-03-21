@@ -23,22 +23,28 @@ class CacheSet
 {
    public:
 
-      static CacheSet* createCacheSet(String cfgname, core_id_t core_id, String replacement_policy, CacheBase::cache_t cache_type, UInt32 associativity, UInt32 blocksize, CacheSetInfo* set_info = NULL);
+      static CacheSet* createCacheSet(String cfgname, core_id_t core_id, String replacement_policy, CacheBase::cache_t cache_type, UInt32 associativity, UInt32 blocksize, CacheSetInfo* set_info = NULL, bool is_tlb_set = false);
       static CacheSetInfo* createCacheSetInfo(String name, String cfgname, core_id_t core_id, String replacement_policy, UInt32 associativity);
       static CacheBase::ReplacementPolicy parsePolicyType(String policy);
       static UInt8 getNumQBSAttempts(CacheBase::ReplacementPolicy, String cfgname, core_id_t core_id);
 
    protected:
+
       CacheBlockInfo** m_cache_block_info_array;
       char* m_blocks;
       UInt32 m_associativity;
       UInt32 m_blocksize;
       Lock m_lock;
+      bool m_is_tlb_set;
+      UInt32 inserts;
+      UInt32 evictions;
+      UInt32 invalidations;
+      
 
    public:
 
       CacheSet(CacheBase::cache_t cache_type,
-            UInt32 associativity, UInt32 blocksize);
+            UInt32 associativity, UInt32 blocksize, bool is_tlb_set);
       virtual ~CacheSet();
 
       UInt32 getBlockSize() { return m_blocksize; }
@@ -48,7 +54,12 @@ class CacheSet
       void read_line(UInt32 line_index, UInt32 offset, Byte *out_buff, UInt32 bytes, bool update_replacement);
       void write_line(UInt32 line_index, UInt32 offset, Byte *in_buff, UInt32 bytes, bool update_replacement);
       CacheBlockInfo* find(IntPtr tag, UInt32* line_index = NULL);
+      // TLB-aware find that matches both tag AND page_size to avoid false matches
+      // between entries with the same tag but different VPNs (e.g., 4KB vs 2MB pages)
+      CacheBlockInfo* findTLB(IntPtr tag, int page_size, UInt32* line_index = NULL);
       bool invalidate(IntPtr& tag);
+      // TLB-aware invalidate that matches both tag AND page_size
+      bool invalidateTLB(IntPtr tag, int page_size);
       void insert(CacheBlockInfo* cache_block_info, Byte* fill_buff, bool* eviction, CacheBlockInfo* evict_block_info, Byte* evict_buff, CacheCntlr *cntlr = NULL);
 
       CacheBlockInfo* peekBlock(UInt32 way) const { return m_cache_block_info_array[way]; }
@@ -58,8 +69,19 @@ class CacheSet
 
       virtual UInt32 getReplacementIndex(CacheCntlr *cntlr) = 0;
       virtual void updateReplacementIndex(UInt32) = 0;
+      
+      // Get LRU/recency bits for a way (0 = MRU, higher = older)
+      // Default implementation returns way index (no recency info)
+      virtual UInt8 getRecencyBits(UInt32 way) const { return (UInt8)way; }
 
       bool isValidReplacement(UInt32 index);
+
+      uint64_t countPageWalkCacheBlocks();
+      uint64_t countSecurityCacheBlocks();
+      uint64_t countExpressiveCacheBlocks();
+      uint64_t countUtopiaCacheBlocks();
+      uint64_t countTLBCacheBlocks();
+
 };
 
 #endif /* CACHE_SET_H */

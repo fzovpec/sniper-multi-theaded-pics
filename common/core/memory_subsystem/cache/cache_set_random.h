@@ -7,7 +7,7 @@ class CacheSetRandom : public CacheSet
 {
    public:
       CacheSetRandom(CacheBase::cache_t cache_type,
-            UInt32 associativity, UInt32 blocksize);
+            UInt32 associativity, UInt32 blocksize, bool is_tlb_set);
       ~CacheSetRandom();
 
       UInt32 getReplacementIndex(CacheCntlr *cntlr);

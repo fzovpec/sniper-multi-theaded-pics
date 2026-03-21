@@ -577,33 +577,12 @@ namespace ParametricDramDirectoryMSI
 			}
 		}
 
-		// Get the trace thread from the trace manager 
-		TraceThread *trace_thread = Sim()->getTraceManager()->getTraceThread(app_id, thread_id);
-
-		
-		// This means that we are in the kernel thread which accesses the memory directly
-		// and we do not need to perform translation
-		if ( (trace_thread->getCurrentSiftReader() == trace_thread->getKernelSiftReader()) && this->getIsUserspaceMimicosEnabled())
-		{
-#if DEBUG_MEM_MANAGER >= DEBUG_BASIC
-			log_file_mmu << "We are in the kernel thread, skipping translation for address: " << address << std::endl;
-#endif
-			skip_translation = true;
-		}
-
-		if(trace_thread->getCurrentSiftReader() == trace_thread->getAppSiftReader())
-		{
-			// If we are in the user thread, we perform translation
-#if DEBUG_MEM_MANAGER >= DEBUG_DETAILED
-			log_file_mmu << "[Memory Manager] Memory Access: " << address << " in user thread, performing translation" << std::endl;
-#endif
-		}
-		else
-		{
-#if DEBUG_MEM_MANAGER >= DEBUG_DETAILED
-			log_file_mmu << "[Memory Manager] Memory Access: " << address << " in kernel thread, skipping translation" << std::endl;
-#endif
-		}
+		// NOTE: Dual-trace (kernel/app SIFT reader) support requires the MimicOS
+		// trace frontend series.  When userspace MimicOS is enabled but the trace
+		// infrastructure is not available, we conservatively perform translation
+		// for every access (i.e. we never set skip_translation based on trace context).
+		(void)app_id;
+		(void)thread_id;
 
 		LOG_ASSERT_ERROR(mem_component <= m_last_level_cache,
 						 "Error: invalid mem_component (%d) for coreInitiateMemoryAccess", mem_component);

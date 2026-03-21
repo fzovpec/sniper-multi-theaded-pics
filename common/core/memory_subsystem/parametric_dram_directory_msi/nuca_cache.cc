@@ -144,3 +144,15 @@ NucaCache::accessDataArray(Cache::access_t access, SubsecondTime t_start, ShmemP
 
    return queue_delay + m_data_access_time.getLatency();
 }
+
+void
+NucaCache::markTranslationMetadata(IntPtr address, CacheBlockInfo::block_type_t blocktype)
+{
+   m_cache->markMetadata(address, blocktype);
+}
+
+void
+NucaCache::measureStats()
+{
+   m_cache->measureStats();
+}

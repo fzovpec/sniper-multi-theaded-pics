@@ -8,18 +8,20 @@
 CacheSetSRRIP::CacheSetSRRIP(
       String cfgname, core_id_t core_id,
       CacheBase::cache_t cache_type,
-      UInt32 associativity, UInt32 blocksize, CacheSetInfoLRU* set_info, UInt8 num_attempts)
-   : CacheSet(cache_type, associativity, blocksize)
+      UInt32 associativity, UInt32 blocksize, CacheSetInfoLRU* set_info, UInt8 num_attempts, bool is_tlb_set)
+   : CacheSet(cache_type, associativity, blocksize, is_tlb_set)
    , m_rrip_numbits(Sim()->getCfg()->getIntArray(cfgname + "/srrip/bits", core_id))
    , m_rrip_max((1 << m_rrip_numbits) - 1)
    , m_rrip_insert(m_rrip_max - 1)
    , m_num_attempts(num_attempts)
    , m_replacement_pointer(0)
    , m_set_info(set_info)
+   , m_srrip_tlb_enabled(Sim()->getCfg()->getBoolArray(cfgname + "/srrip/tlb_enabled", core_id))
 {
    m_rrip_bits = new UInt8[m_associativity];
    for (UInt32 i = 0; i < m_associativity; i++)
       m_rrip_bits[i] = m_rrip_insert;
+
 }
 
 CacheSetSRRIP::~CacheSetSRRIP()
@@ -37,6 +39,10 @@ CacheSetSRRIP::getReplacementIndex(CacheCntlr *cntlr)
          // If there is an invalid line(s) in the set, regardless of the LRU bits of other lines, we choose the first invalid line to replace
          // Prepare way for a new line: set prediction to 'long'
          m_rrip_bits[i] = m_rrip_insert;
+         
+         if(m_cache_block_info_array[i]->isPageTableBlock() && m_srrip_tlb_enabled){
+            m_rrip_bits[i] = 0;
+         }
          return i;
       }
    }
@@ -53,11 +59,15 @@ CacheSetSRRIP::getReplacementIndex(CacheCntlr *cntlr)
             UInt8 index = m_replacement_pointer;
 
             bool qbs_reject = false;
+            bool attempt_goforit = false;
             if (attempt < m_num_attempts - 1)
             {
                LOG_ASSERT_ERROR(cntlr != NULL, "CacheCntlr == NULL, QBS can only be used when cntlr is passed in");
                qbs_reject = cntlr->isInLowerLevelCache(m_cache_block_info_array[index]);
+               attempt_goforit = true;
+
             }
+
 
             if (qbs_reject)
             {
@@ -69,6 +79,17 @@ CacheSetSRRIP::getReplacementIndex(CacheCntlr *cntlr)
                continue;
             }
 
+            if(m_cache_block_info_array[index]->isPageTableBlock() && m_srrip_tlb_enabled && attempt_goforit){
+               
+              // std::cout << "Updating metadata block inside the set while searching for replacement" << std::endl;
+
+               m_rrip_bits[index] = 0;
+               cntlr->incrementQBSLookupCost();
+               ++attempt;
+               continue;            
+            }
+
+
             m_replacement_pointer = (m_replacement_pointer + 1) % m_associativity;
             // Prepare way for a new line: set prediction to 'long'
             m_rrip_bits[index] = m_rrip_insert;
@@ -76,6 +97,9 @@ CacheSetSRRIP::getReplacementIndex(CacheCntlr *cntlr)
             m_set_info->incrementAttempt(attempt);
 
             LOG_ASSERT_ERROR(isValidReplacement(index), "SRRIP selected an invalid replacement candidate" );
+            // if(m_cache_block_info_array[index]->isPageTableBlock() && m_srrip_tlb_enabled){
+            //    std::cout << "Evicting a metadata block " << m_cache_block_info_array[index]->isPageTableBlock() << std::endl;
+            // }
             return index;
          }
 
@@ -100,6 +124,14 @@ CacheSetSRRIP::updateReplacementIndex(UInt32 accessed_index)
 {
    m_set_info->increment(m_rrip_bits[accessed_index]);
 
+   if(m_cache_block_info_array[accessed_index]->isPageTableBlock() && m_srrip_tlb_enabled){
+      m_rrip_bits[accessed_index] = 0;
+      //std::cout << "Updating metadata block inside the set" << std::endl;
+
+      return;
+   }
    if (m_rrip_bits[accessed_index] > 0)
       m_rrip_bits[accessed_index]--;
+
+   
 }

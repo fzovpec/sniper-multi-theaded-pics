@@ -19,6 +19,7 @@ class MemoryManagerFast : public MemoryManagerBase
       virtual ~MemoryManagerFast() {}
 
       HitWhere::where_t coreInitiateMemoryAccess(
+            IntPtr eip,
             MemComponent::component_t mem_component,
             Core::lock_signal_t lock_signal,
             Core::mem_op_t mem_op_type,
@@ -58,6 +59,10 @@ class MemoryManagerFast : public MemoryManagerBase
 
       SubsecondTime getL1HitLatency(void) { return SubsecondTime::Zero(); }
       void addL1Hits(bool icache, Core::mem_op_t mem_op_type, UInt64 hits) {}
+
+      void measureNucaStats() {}
+      NucaCache *getNucaCache() { return NULL; }
+      Cache *getCache(MemComponent::component_t mem_component) { return NULL; }
 };
 
 #endif // __MEMORY_MANAGER_FAST_H

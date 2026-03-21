@@ -9,11 +9,14 @@ class CacheSetSRRIP : public CacheSet
    public:
       CacheSetSRRIP(String cfgname, core_id_t core_id,
             CacheBase::cache_t cache_type,
-            UInt32 associativity, UInt32 blocksize, CacheSetInfoLRU* set_info, UInt8 num_attempts);
+            UInt32 associativity, UInt32 blocksize, CacheSetInfoLRU* set_info, UInt8 num_attempts, bool is_tlb_set);
       ~CacheSetSRRIP();
 
       UInt32 getReplacementIndex(CacheCntlr *cntlr);
       void updateReplacementIndex(UInt32 accessed_index);
+      
+      // Override to return RRIP bits (higher = older/less recently used)
+      virtual UInt8 getRecencyBits(UInt32 way) const override { return m_rrip_bits[way]; }
 
    private:
       const UInt8 m_rrip_numbits;
@@ -23,6 +26,7 @@ class CacheSetSRRIP : public CacheSet
       UInt8* m_rrip_bits;
       UInt8  m_replacement_pointer;
       CacheSetInfoLRU* m_set_info;
+      bool m_srrip_tlb_enabled;
 };
 
 #endif /* CACHE_SET_H */

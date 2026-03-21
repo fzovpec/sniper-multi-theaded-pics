@@ -60,6 +60,8 @@ class CacheBase
          SRRIP,
          SRRIP_QBS,
          RANDOM,
+         MPLRU,       // Metadata-Priority LRU for NUCA
+         CHIRP,       // Dead-entry predictor (CHiRP) for TLB replacement
          NUM_REPLACEMENT_POLICIES
       };
 
@@ -84,8 +86,11 @@ class CacheBase
 
       // utilities
       void splitAddress(const IntPtr addr, IntPtr& tag, UInt32& set_index) const;
+      void splitAddressTLB(const IntPtr addr, IntPtr& tag, UInt32& set_index, int page_size) const;
       void splitAddress(const IntPtr addr, IntPtr& tag, UInt32& set_index, UInt32& block_offset) const;
+      void splitAddressTLB(const IntPtr addr, IntPtr& tag, UInt32& set_index, UInt32& block_offset, int page_size) const;
       IntPtr tagToAddress(const IntPtr tag);
+      IntPtr tagToAddressTLB(const IntPtr tag, int page_size);
       String getName(void) { return m_name; }
 
       UInt32 getNumSets() const { return m_num_sets; }

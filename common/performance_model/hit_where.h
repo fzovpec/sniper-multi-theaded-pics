@@ -35,6 +35,8 @@ class HitWhere
          UNKNOWN,
          PREDICATE_FALSE, // CMOV for which the predicate was false, did not actually execute
          PREFETCH_NO_MAPPING,
+         SHADOW_CACHE,
+         PAGE_FAULT,
          NUM_HITWHERES
       };
 };

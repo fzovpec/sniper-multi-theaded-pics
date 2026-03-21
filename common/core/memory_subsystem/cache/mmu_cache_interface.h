@@ -45,6 +45,7 @@ public:
    /**
     * @brief Return the completion time of the most recent prefetch.
     *
+    * Used by speculative engines to compute timing deltas.
     * Default returns Zero for implementations that don't track prefetch timing.
     */
    virtual SubsecondTime getLastPrefetchCompletion() const

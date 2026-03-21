@@ -6,8 +6,8 @@
 
 CacheSetLRU::CacheSetLRU(
       CacheBase::cache_t cache_type,
-      UInt32 associativity, UInt32 blocksize, CacheSetInfoLRU* set_info, UInt8 num_attempts)
-   : CacheSet(cache_type, associativity, blocksize)
+      UInt32 associativity, UInt32 blocksize, CacheSetInfoLRU* set_info, UInt8 num_attempts, bool is_tlb_set)
+   : CacheSet(cache_type, associativity, blocksize, is_tlb_set)
    , m_num_attempts(num_attempts)
    , m_set_info(set_info)
 {

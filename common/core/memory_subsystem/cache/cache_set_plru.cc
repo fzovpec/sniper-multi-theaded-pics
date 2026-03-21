@@ -5,8 +5,8 @@
 
 CacheSetPLRU::CacheSetPLRU(
       CacheBase::cache_t cache_type,
-      UInt32 associativity, UInt32 blocksize) :
-   CacheSet(cache_type, associativity, blocksize)
+      UInt32 associativity, UInt32 blocksize, bool is_tlb_set) :
+   CacheSet(cache_type, associativity, blocksize, is_tlb_set)
 {
    LOG_ASSERT_ERROR(associativity == 4 || associativity == 8,
       "PLRU not implemted for associativity %d (only 4, 8)", associativity);

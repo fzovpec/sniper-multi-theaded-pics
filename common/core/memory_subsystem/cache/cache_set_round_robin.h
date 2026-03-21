@@ -7,7 +7,7 @@ class CacheSetRoundRobin : public CacheSet
 {
    public:
       CacheSetRoundRobin(CacheBase::cache_t cache_type,
-            UInt32 associativity, UInt32 blocksize);
+            UInt32 associativity, UInt32 blocksize, bool is_tlb_set);
       ~CacheSetRoundRobin();
 
       UInt32 getReplacementIndex(CacheCntlr *cntlr);

@@ -30,11 +30,14 @@ class CacheSetLRU : public CacheSet
 {
    public:
       CacheSetLRU(CacheBase::cache_t cache_type,
-            UInt32 associativity, UInt32 blocksize, CacheSetInfoLRU* set_info, UInt8 num_attempts);
+            UInt32 associativity, UInt32 blocksize, CacheSetInfoLRU* set_info, UInt8 num_attempts, bool is_tlb_set);
       virtual ~CacheSetLRU();
 
       virtual UInt32 getReplacementIndex(CacheCntlr *cntlr);
       void updateReplacementIndex(UInt32 accessed_index);
+      
+      // Override to return actual LRU bits
+      virtual UInt8 getRecencyBits(UInt32 way) const override { return m_lru_bits[way]; }
 
    protected:
       const UInt8 m_num_attempts;

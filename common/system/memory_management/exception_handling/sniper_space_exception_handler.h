@@ -2,6 +2,7 @@
 #define SNIPER_SPACE_EXCEPTION_HANDLER_H
 
 #include "misc/exception_handler_base.h"
+#include <fstream>
 
 class SniperExceptionHandler : public ExceptionHandlerBase {
 private:

@@ -63,3 +63,6 @@
 #define SPEC_EVICTION_WINDOW        50
 
 #define DEBUG_FAST_DETAILED         DEBUG_NONE /* 0, 1 or 2 */ // Fast detailed cache hierarchy logging
+
+// MPLRU cache replacement policy
+#define DEBUG_MPLRU                 DEBUG_NONE /* 0, 1 or 2 */ // MPLRU replacement policy logging
