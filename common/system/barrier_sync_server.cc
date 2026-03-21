@@ -18,6 +18,7 @@
 BarrierSyncServer::BarrierSyncServer()
    : m_local_clock_list(Sim()->getConfig()->getApplicationCores(), SubsecondTime::Zero())
    , m_barrier_acquire_list(Sim()->getConfig()->getApplicationCores(), false)
+   , m_core_parked(Sim()->getConfig()->getApplicationCores())
    , m_core_cond(Sim()->getConfig()->getApplicationCores(), NULL)
    , m_core_group(Sim()->getConfig()->getApplicationCores(), INVALID_CORE_ID)
    , m_core_thread(Sim()->getConfig()->getApplicationCores(), INVALID_THREAD_ID)
@@ -44,6 +45,9 @@ BarrierSyncServer::BarrierSyncServer()
 
    for(core_id_t core_id = 0; core_id < (core_id_t)Sim()->getConfig()->getApplicationCores(); ++core_id)
       m_core_cond[core_id] = new ConditionVariable();
+
+   for(core_id_t core_id = 0; core_id < (core_id_t)Sim()->getConfig()->getApplicationCores(); ++core_id)
+      m_core_parked[core_id].store(false, std::memory_order_relaxed);
 
    m_next_barrier_time = m_barrier_interval;
 
@@ -82,6 +86,11 @@ BarrierSyncServer::synchronize(core_id_t core_id, SubsecondTime time)
 
    LOG_ASSERT_ERROR(core->getState() == Core::RUNNING || core->getState() == Core::INITIALIZING, "Core(%i) is not running or initializing at time(%s)", core_id, itostr(time).c_str());
    LOG_ASSERT_ERROR(m_barrier_acquire_list[master_core_id] == false, "Core(%i) or its sibling is already in the barrier (this is thread %d, we have thread %d)", master_core_id, thread_me, m_core_thread[master_core_id]);
+
+   // Auto-unpark: a core that was parked (spinning on the page-fault lock)
+   // can now participate in the barrier again since its clock has caught up.
+   if (m_core_parked[master_core_id].load(std::memory_order_acquire))
+      m_core_parked[master_core_id].store(false, std::memory_order_release);
 
    if (time < m_next_barrier_time && !m_fastforward)
    {
