@@ -17,7 +17,7 @@
 #include "sim_api.h"
 #include "onlinebbv_count.h"
 #include "globals.h"
-#include "hooks_manager.h"
+// #include "hooks_manager.h"  // Not used in recorder context
 #include "recorder_control.h"
 #include "sift/sift_format.h"
 #include "sift_assert.h"
@@ -373,7 +373,7 @@ class Predictor {
                     cluster_id = last_predicted_cluster_id;
                     if( !dvfs_enable ) { 
                         next_mode =  mtng::SimMode::FastForwardMode;
-                        return std::make_pair<mtng::SimMode,uint32_t>( next_mode,cluster_id );
+                        return std::make_pair(next_mode, cluster_id);
                     }
                 } else {
                     cluster_id = get_cluster_id_from_history();
@@ -393,7 +393,7 @@ class Predictor {
                 } else {
                     next_mode =  mtng::SimMode::FastForwardMode;
                 }
-                return std::make_pair<mtng::SimMode,uint32_t>( next_mode,cluster_id );
+                return std::make_pair(next_mode, cluster_id);
             }
             bool if_predict_right( uint64_t cluster_id ) {
                 if(first_update) {
@@ -772,9 +772,9 @@ class Predictor {
 
             if( cluster2feature_it == cluster2feature.end() ) {
 
-                return std::make_pair<Feature<dvfs_enable>,bool>( Feature<dvfs_enable>(), false);
+                return std::make_pair(Feature<dvfs_enable>(), false);
             } else {
-                return std::make_pair<Feature<dvfs_enable>,bool>( cluster2feature_it->second, true );
+                return std::make_pair(cluster2feature_it->second, true );
             }
         }
 

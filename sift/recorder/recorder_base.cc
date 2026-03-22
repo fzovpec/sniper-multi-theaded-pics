@@ -47,6 +47,29 @@ VOID sendInstruction(THREADID threadid, ADDRINT addr, UINT32 size, UINT32 num_ad
    ++thread_data[threadid].icount;
    ++thread_data[threadid].icount_detailed;
 
+   // Periodically dump VMA regions to trace file
+   if (vma_output && (thread_data[threadid].icount_detailed % 10000 == 0))
+   {
+      pid_t pid = PIN_GetPid();
+      std::ostringstream path;
+      path << "/proc/" << pid << "/maps";
+      std::ifstream inFile(path.str().c_str());
+      if (inFile)
+      {
+         *vma_output << "VMA: " << thread_data[threadid].icount_detailed << " " << std::endl;
+         std::string line;
+         while (std::getline(inFile, line))
+         {
+            size_t hyphenPos = line.find('-');
+            if (hyphenPos != std::string::npos)
+            {
+               size_t spacePos = line.find(' ', hyphenPos);
+               *vma_output << line.substr(0, spacePos) << std::endl;
+            }
+         }
+      }
+   }
+
 
    // Reconstruct basic blocks (we could ask Pin, but do it the same way as TraceThread will do it)
 //   LOG2(INFO) << "??????";

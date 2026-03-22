@@ -48,6 +48,7 @@ extern KNOB<BOOL> KnobRoutineTracingOutsideDetailed;
 extern KNOB<BOOL> KnobDebug;
 extern KNOB<std::string> KnobArch;
 extern KNOB<BOOL> KnobVerbose;
+extern KNOB<BOOL> KnobTrackVMAs;
 extern KNOB<UINT64> KnobStopAddress;
 extern KNOB<UINT64> KnobMaxThreads;
 extern KNOB<UINT64> KnobExtraePreLoaded;
@@ -76,6 +77,7 @@ extern BOOL any_thread_in_detail;
 extern Sift::Mode current_mode;
 extern const bool verbose;
 extern std::unordered_map<ADDRINT, bool> routines;
+extern std::ofstream *vma_output;
 
 struct extrae_image_t {
   ADDRINT top_addr;
@@ -102,5 +104,9 @@ void init_global_bbv();
 uint64_t get_bbv_thread_dim( uint32_t tid, uint32_t dim);
 uint64_t get_bbv_thread_counter( uint32_t tid);
 extern PinToolWarmup *getWarmupTool();
+double getSystemTime();
+extern double time_stamp1;
+extern double time_stamp_begin;
+extern double time_stamp_end;
 
 #endif // __GLOBALS_H

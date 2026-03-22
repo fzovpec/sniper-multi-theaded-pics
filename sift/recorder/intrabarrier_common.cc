@@ -17,7 +17,7 @@
 #include "sim_api.h"
 #include "bbv_count.h"
 #include "globals.h"
-#include "hooks_manager.h"
+// #include "hooks_manager.h"  // Not used in recorder context
 #include "recorder_control.h"
 #include "sift/sift_format.h"
 #include "sift_assert.h"

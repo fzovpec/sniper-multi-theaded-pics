@@ -321,6 +321,19 @@ int main(int argc, char **argv)
         //initMtr();
    }
 
+   // Initialize VMA tracking output file if requested
+   if (KnobTrackVMAs.Value())
+   {
+      std::string vma_filename = KnobOutputFile.Value() + ".app" + std::to_string(app_id >= 0 ? app_id : 0) + ".vma";
+      vma_output = new std::ofstream(vma_filename.c_str());
+      if (!vma_output->is_open())
+      {
+         std::cerr << "[SIFT_RECORDER] Warning: Could not open VMA output file: " << vma_filename << std::endl;
+         delete vma_output;
+         vma_output = nullptr;
+      }
+   }
+
    PIN_StartProgram();
 
    return 0;

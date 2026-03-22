@@ -18,6 +18,7 @@ KNOB<BOOL> KnobRoutineTracing(KNOB_MODE_WRITEONCE, "pintool", "sniper:rtntrace",
 KNOB<BOOL> KnobRoutineTracingOutsideDetailed(KNOB_MODE_WRITEONCE, "pintool", "sniper:rtntrace_outsidedetail", "0", "routine tracing");
 KNOB<BOOL> KnobDebug(KNOB_MODE_WRITEONCE, "pintool", "sniper:debug", "0", "start debugger on internal exception");
 KNOB<BOOL> KnobVerbose(KNOB_MODE_WRITEONCE, "pintool", "sniper:verbose", "0", "verbose output");
+KNOB<BOOL> KnobTrackVMAs(KNOB_MODE_WRITEONCE, "pintool", "sniper:vma", "0", "track VMA regions");
 KNOB<UINT64> KnobStopAddress(KNOB_MODE_WRITEONCE, "pintool", "sniper:stop", "0", "stop address (0 = disabled)");
 KNOB<UINT64> KnobMaxThreads(KNOB_MODE_WRITEONCE, "pintool", "sniper:maxthreads", "0", "maximum number of threads (0 = default)");
 
@@ -65,6 +66,7 @@ BOOL in_roi = false;
 BOOL any_thread_in_detail = false;
 Sift::Mode current_mode = Sift::ModeIcount;
 std::unordered_map<ADDRINT, bool> routines;
+std::ofstream *vma_output = nullptr;
 
 extrae_image_t extrae_image;
 //KNOB<std::string>  KnobArch( KNOB_MODE_WRITEONCE, "pintool", "arch", "gainestown", "micro architecture");
@@ -87,9 +89,9 @@ double getSystemTime()
         gettimeofday(&timer, 0); 
         return ((double)(timer.tv_sec) + (double)(timer.tv_usec)*1.0e-6);
     }   
- double time_stamp1;
- double time_stamp_begin;
- double time_stamp_end;
+double time_stamp1;
+double time_stamp_begin;
+double time_stamp_end;
 //class PinToolWarmup;
 PinToolWarmup warmup_tool;
 PinToolWarmup* getWarmupTool() {return &warmup_tool;}
