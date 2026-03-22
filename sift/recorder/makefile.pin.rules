@@ -130,7 +130,7 @@ all: sift/libsift.a $(OBJDIR)sift_recorder
 
 $(OBJDIR)%$(OBJ_SUFFIX) : %.cc $(wildcard *.h)
 	$(_MSG) '[CXX   ]' $(subst $(shell readlink -f $(ROOT_DIR)/../..)/,,$(shell readlink -f $@))
-	$(_CMD) $(CXX) -I$(ROOT_DIR)/sift -I$(ROOT_DIR)/.. -I$(ROOT_DIR)/../../include -I$(ROOT_DIR)/../../common/misc -I$(ROOT_DIR)/../../common/config $(TARGET_ARCH) $(COMPILE_PIN_FLAGS) -c -o $@ $<
+	$(_CMD) $(CXX) -I$(ROOT_DIR)/sift -I$(ROOT_DIR)/.. $(TARGET_ARCH) $(COMPILE_PIN_FLAGS) -c -o $@ $<
 
 sift/sift_reader.h: sift
 	@for i in $(wildcard $(ROOT_DIR)/../../sift/*.h) $(wildcard $(ROOT_DIR)/../../sift/*.cc) ; do ln -fs $$i sift/. ; done

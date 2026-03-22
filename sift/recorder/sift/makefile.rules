@@ -62,7 +62,7 @@ endif
 OBJECTS=$(patsubst %.cc,%.o,$(SOURCES))
 $(OBJDIR)%.o : %.cc $(wildcard *.h) 
 	$(_MSG) '[CXX   ]' $(subst $(shell readlink -f $(ROOT_DIR)/../../..)/,,$(shell readlink -f $@))
-	$(_CMD) $(CXX) $(TOOL_CXXFLAGS) -I$(ROOT_DIR)/../../../sift -c -o $@ $< $(CXXFLAGS)
+	$(_CMD) $(CXX) $(TOOL_CXXFLAGS) -c -o $@ $< $(CXXFLAGS)
 
 $(OBJDIR)libsift$(LIB_SUFFIX): $(OBJDIR)sift_reader$(OBJ_SUFFIX) $(OBJDIR)sift_utils$(OBJ_SUFFIX) $(OBJDIR)sift_writer$(OBJ_SUFFIX) $(OBJDIR)zfstream$(OBJ_SUFFIX)
 	$(_MSG) '[LD    ]' $(subst $(shell readlink -f $(ROOT_DIR)/../../..)/,,$(shell readlink -f $@))

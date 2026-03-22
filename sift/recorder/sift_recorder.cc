@@ -3,7 +3,7 @@
 #include <stdlib.h>
 #include <syscall.h>
 #include <vector>
-#include "log2.h"
+
 #include <cstdio>
 #include <cassert>
 #include <unistd.h>
@@ -14,8 +14,7 @@
 #include <sys/syscall.h>
 #include <string.h>
 #include <pthread.h>
-#include "intrabarrier_analysis.h"
-#include "intrabarrier_mtng.h"
+
 #include "pin.H"
 
 #if defined(SDE_INIT)
@@ -44,7 +43,6 @@ static CONTROLLER::CONTROL_MANAGER control("pinplay:");
 
 VOID Fini(INT32 code, VOID *v)
 {
-     thread_data[0].output->Magic(SIM_CMD_ROI_END, 0, 0);
    for (unsigned int i = 0 ; i < max_num_threads ; i++)
    {
       if (thread_data[i].output)
@@ -53,13 +51,6 @@ VOID Fini(INT32 code, VOID *v)
       }
    }
 }
-void initMtr()
-{
-    mtr_enabled = true;
-    PinToolWarmup* warmup_tool = getWarmupTool();
-    warmup_tool->activate();
-}
-
 
 VOID Detach(VOID *v)
 {
@@ -93,7 +84,7 @@ VOID forkAfterInChild(THREADID threadid, const CONTEXT *ctxt, VOID *v)
    app_id = child_app_id;
    num_threads = 1;
    // Open new SIFT pipe for thread 0
-   thread_data[0].bbv = new Bbv(0);
+   thread_data[0].bbv = new Bbv();
    openFile(0);
 }
 
@@ -199,7 +190,6 @@ int main(int argc, char **argv)
    {
       max_num_threads = KnobMaxThreads.Value();
    }
-   init_global_bbv();
    size_t thread_data_size = max_num_threads * sizeof(*thread_data);
    if (posix_memalign((void**)&thread_data, LINE_SIZE_BYTES, thread_data_size) != 0)
    {
@@ -233,8 +223,6 @@ int main(int argc, char **argv)
       openFile(0);
    }
 
-
-   thread_data[0].output->Magic(SIM_CMD_ROI_START, 0, 0);
    // When attaching with --pid, there could be a number of threads already running.
    // Manually call NewThread() because the normal method to start new thread pipes (SYS_clone)
    // will already have happened
@@ -312,27 +300,6 @@ int main(int argc, char **argv)
    }
 
    pinboost_register("SIFT_RECORDER", KnobDebug.Value());
-
-   int64_t pacsim_version = KnobPacSimEnable.Value();
-   mtr_enabled = false; 
-   if (pacsim_version) {
-        std::cout << "[PacSim]: Pacsim is Enabled\n";
-        intrabarrier_mtng::activate( false) ;
-        //initMtr();
-   }
-
-   // Initialize VMA tracking output file if requested
-   if (KnobTrackVMAs.Value())
-   {
-      std::string vma_filename = KnobOutputFile.Value() + ".app" + std::to_string(app_id >= 0 ? app_id : 0) + ".vma";
-      vma_output = new std::ofstream(vma_filename.c_str());
-      if (!vma_output->is_open())
-      {
-         std::cerr << "[SIFT_RECORDER] Warning: Could not open VMA output file: " << vma_filename << std::endl;
-         delete vma_output;
-         vma_output = nullptr;
-      }
-   }
 
    PIN_StartProgram();
 

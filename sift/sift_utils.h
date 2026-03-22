@@ -5,6 +5,8 @@
 
 namespace Sift
 {
+   // TODO: @vlnitu Discuss with @konkanello if we want to move this structure in a common place; currently it's code duplicated 
+   // sift_utils.h & mimicos.h
    struct Message{
       int argc;
       uint64_t *argv;

@@ -15,8 +15,6 @@
 #include <unistd.h>
 
 #if !defined(PINPLAY) && !defined(PIN_CRT)
-// ChampSim trace support is only used on the simulator side,
-// not inside the Pin/SDE recorder (which requires C++11).
 #include "champsim/trace_instruction.h"
 #include "champsim/inf_stream.h"
 #endif
@@ -56,7 +54,7 @@ namespace
       }
    };
 }
-#endif // !SDE_INIT
+#endif // !PINPLAY
 
 namespace Sift
 {
@@ -146,7 +144,7 @@ bool Reader::initStream()
    // Heuristic: compressed file with Champsim extension → likely ChampSim
    if (m_format == TraceFormat::Auto && maybe_champsim_compressed)
       m_format = TraceFormat::ChampSim;
-#endif
+#endif // !PINPLAY
 
    inputstream = new std::ifstream(m_filename, std::ios::in | std::ios::binary);
    if ((!inputstream->is_open()) || (!inputstream->good()))
@@ -183,7 +181,7 @@ bool Reader::initStream()
 
       return true;
    }
-#endif // !SDE_INIT
+#endif // !PINPLAY
 
    // Try SIFT header
    input = new vifstream(inputstream);
@@ -218,7 +216,7 @@ bool Reader::initStream()
          return true;
       }
       else
-#endif // !SDE_INIT
+#endif // !PINPLAY
       {
          std::cerr << "[SIFT:" << m_id << "] Invalid magic number\n";
          return false;
@@ -298,7 +296,7 @@ bool Reader::Read(Instruction &inst)
    if (input == NULL
 #if !defined(PINPLAY) && !defined(PIN_CRT)
        && !m_champsim_stream
-#endif
+#endif // !PINPLAY
       )
    {
       if (!initStream())
@@ -325,7 +323,7 @@ bool Reader::Read(Instruction &inst)
    {
       return readChampSim(inst);
    }
-#endif
+#endif // !PINPLAY
 
    // Original SIFT path
    while(!m_seen_end)
@@ -802,7 +800,7 @@ bool Reader::readChampSim(Instruction &inst)
 
    return true;
 }
-#endif // !SDE_INIT
+#endif // !PINPLAY
 
 bool Reader::AccessMemory(MemoryLockType lock_signal, MemoryOpType mem_op, uint64_t d_addr, uint8_t *data_buffer, uint32_t data_size)
 {
@@ -820,7 +818,7 @@ bool Reader::AccessMemory(MemoryLockType lock_signal, MemoryOpType mem_op, uint6
       std::cerr << "[SIFT:" << m_id << "] AccessMemory not supported for ChampSim traces\n";
       return false;
    }
-#endif
+#endif // !PINPLAY
 
    if (input == NULL)
    {
@@ -944,7 +942,7 @@ const StaticInstruction* Reader::getStaticInstruction(uint64_t addr, uint8_t siz
 #if !defined(PINPLAY) && !defined(PIN_CRT)
    if (m_format == TraceFormat::ChampSim)
       return getChampSimStaticInstruction(addr);
-#endif
+#endif // !PINPLAY
 
    const StaticInstruction *sinst;
 
@@ -1006,7 +1004,7 @@ const StaticInstruction* Reader::getChampSimStaticInstruction(uint64_t addr)
 
    return sinst;
 }
-#endif // !SDE_INIT
+#endif // !PINPLAY
 
 void Reader::sendSyscallResponse(uint64_t return_code)
 {

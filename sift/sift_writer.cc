@@ -23,6 +23,8 @@
 #define VERBOSE_HEX 0
 #define VERBOSE_ICACHE 0
 
+//#define DEBUG_SIFT_WRITER
+
 void __assert_fail(const char *__assertion, const char *__file, unsigned int __line, const char *__function) __THROW
 {
    std::cerr << "[SIFT] " << __file << ":" << __line << ": " << __function << ": Assertion `" << __assertion << "' failed." << std::endl;
@@ -768,13 +770,21 @@ uint64_t Sift::Writer::Magic(uint64_t a, uint64_t b, uint64_t c)
    output->write(reinterpret_cast<char*>(&c), sizeof(uint64_t));
    output->flush();
 
+
+   
+   
    initResponse();
 
    // wait for reply
    while (true)
    {
       Record respRec;
+
       response->read(reinterpret_cast<char*>(&respRec), sizeof(rec.Other));
+      // printf("Record type: %" PRIu8 "\n", respRec.Other.type);
+      // printf("Record zero: %" PRIu8 "\n", respRec.Other.zero);
+
+
       sift_assert(!response->fail());
       sift_assert(respRec.Other.zero == 0);
 
@@ -783,9 +793,11 @@ uint64_t Sift::Writer::Magic(uint64_t a, uint64_t b, uint64_t c)
          case RecOtherMagicInstructionResponse:
          {
             sift_assert(respRec.Other.size == sizeof(uint64_t));
-            uint64_t result;
-            response->read(reinterpret_cast<char*>(&result), sizeof(uint64_t));
-            return result;
+            uint64_t ack;
+            response->read(reinterpret_cast<char*>(&ack), sizeof(uint64_t));
+
+            
+            return ack; // 0 - no error; 1 - otherwise
          }
          case RecOtherMemoryRequest:
             handleMemoryRequest(respRec);
@@ -798,7 +810,6 @@ uint64_t Sift::Writer::Magic(uint64_t a, uint64_t b, uint64_t c)
             break;
       }
    }
-
    // We should not get here
    sift_assert(false);
 }

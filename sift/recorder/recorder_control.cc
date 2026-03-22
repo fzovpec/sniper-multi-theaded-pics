@@ -159,7 +159,7 @@ void setInstrumentationMode(Sift::Mode mode)
 ADDRINT handleMagic(THREADID threadid, const CONTEXT * ctxt, ADDRINT gax, ADDRINT gbx, ADDRINT gcx)
 {
    uint64_t res = gax; // Default: don't modify gax
-
+   
    if (KnobUseResponseFiles.Value() && thread_data[threadid].running && thread_data[threadid].output)
    {
       res = thread_data[threadid].output->Magic(gax, gbx, gcx);
@@ -411,7 +411,7 @@ void closeFile(THREADID threadid)
 
       FILE *fp = fopen(filename, "w");
       fprintf(fp, "%" PRIu64 "\n", thread_data[threadid].bbv->getInstructionCount());
-      for(int i = 0; i < NUM_BBV; ++i)
+      for(int i = 0; i < Bbv::NUM_BBV; ++i)
          fprintf(fp, "%" PRIu64 "\n", thread_data[threadid].bbv->getDimension(i) / thread_data[threadid].bbv->getInstructionCount());
       fclose(fp);
 
