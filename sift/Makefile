@@ -1,6 +1,8 @@
 SOURCES=$(filter-out siftdump.cc,$(wildcard *.cc))
 OBJECTS=$(patsubst %.cc,%.o,$(SOURCES))
 TARGET=libsift.a
+HAVE_LZMA:=$(shell printf '#include <lzma.h>\nint main() { lzma_stream s = LZMA_STREAM_INIT; return (int)s.avail_in; }\n' | $(CXX) -xc++ - -llzma >/dev/null 2>&1 && echo 1 || echo 0)
+LZMA_LIBS=$(if $(filter 1,$(HAVE_LZMA)),-llzma,)
 
 include ../common/Makefile.common
 
@@ -40,7 +42,7 @@ $(TARGET) : $(OBJECTS)
 
 siftdump : siftdump.o $(TARGET)
 	$(_MSG) '[CXX   ]' $(subst $(shell readlink -f $(SIM_ROOT))/,,$(shell readlink -f $@))
-	$(_CMD) $(CXX) $(CXXFLAGS_ARCH) -o $@ $^ -L. -lsift -lz -lbz2 -llzma
+	$(_CMD) $(CXX) $(CXXFLAGS_ARCH) -o $@ $^ -L. -lsift -lz -lbz2 $(LZMA_LIBS)
 
 recorder : $(TARGET)
 	$(_CMD) $(MAKE) $(MAKE_QUIET) -C recorder -f Makefile

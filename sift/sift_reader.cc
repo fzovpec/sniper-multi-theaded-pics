@@ -137,7 +137,8 @@ bool Reader::initStream()
 #if !defined(PINPLAY) && !defined(PIN_CRT)
    std::string fname(m_filename);
    bool is_gz  = fname.size() >= 3 && fname.compare(fname.size() - 3, 3, ".gz") == 0;
-   bool is_xz  = fname.size() >= 3 && fname.compare(fname.size() - 3, 3, ".xz") == 0;
+   bool has_xz_extension = fname.size() >= 3 && fname.compare(fname.size() - 3, 3, ".xz") == 0;
+   bool is_xz  = CHAMPSIM_HAS_LZMA && has_xz_extension;
    bool is_bz2 = fname.size() >= 4 && fname.compare(fname.size() - 4, 4, ".bz2") == 0;
    bool maybe_champsim_compressed = is_gz || is_xz || is_bz2;
 
@@ -160,6 +161,12 @@ bool Reader::initStream()
       filesize = 0;
 
 #if !defined(PINPLAY) && !defined(PIN_CRT)
+   if (has_xz_extension && !CHAMPSIM_HAS_LZMA)
+   {
+      std::cerr << "[SIFT:" << m_id << "] .xz traces require liblzma development headers at build time\n";
+      return false;
+   }
+
    // ChampSim-only path: no SIFT header
    if (m_format == TraceFormat::ChampSim)
    {
@@ -169,8 +176,10 @@ bool Reader::initStream()
       {
          if (is_gz)
             m_champsim_stream.reset(new InflatingChampSimStream<champsim::decomp_tags::gzip_tag_t<>>(fname));
+#if CHAMPSIM_HAS_LZMA
          else if (is_xz)
             m_champsim_stream.reset(new InflatingChampSimStream<champsim::decomp_tags::lzma_tag_t<>>(fname));
+#endif
          else if (is_bz2)
             m_champsim_stream.reset(new InflatingChampSimStream<champsim::decomp_tags::bzip2_tag_t>(fname));
       }
@@ -203,8 +212,10 @@ bool Reader::initStream()
          {
             if (is_gz)
                m_champsim_stream.reset(new InflatingChampSimStream<champsim::decomp_tags::gzip_tag_t<>>(fname));
+#if CHAMPSIM_HAS_LZMA
             else if (is_xz)
                m_champsim_stream.reset(new InflatingChampSimStream<champsim::decomp_tags::lzma_tag_t<>>(fname));
+#endif
             else if (is_bz2)
                m_champsim_stream.reset(new InflatingChampSimStream<champsim::decomp_tags::bzip2_tag_t>(fname));
          }

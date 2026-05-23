@@ -51,7 +51,10 @@ endif
 
 # Assuming python3 include dir is within the gcc search path
 PYTHON_LD_LIBS := $(shell python3-config --libs --embed)
-LD_LIBS += -ldecoder -lsift -lxed -lrt -lz -lbz2 -llzma -lsqlite3 $(PYTHON_LD_LIBS) -ltorch -lc10
+HAVE_LZMA := $(shell printf 'int main() { return 0; }\n' | $(CXX) -xc++ - -llzma >/dev/null 2>&1 && echo 1 || echo 0)
+LZMA_LINK_LIBS := $(if $(filter 1,$(HAVE_LZMA)),-llzma,)
+TORCH_LINK_LIBS := $(if $(wildcard $(SIM_ROOT)/libtorch/lib/libtorch.so),-ltorch,) $(if $(wildcard $(SIM_ROOT)/libtorch/lib/libc10.so),-lc10,)
+LD_LIBS += -ldecoder -lsift -lxed -lrt -lz -lbz2 $(LZMA_LINK_LIBS) -lsqlite3 $(PYTHON_LD_LIBS) $(TORCH_LINK_LIBS)
 
 LD_FLAGS += -L$(SIM_ROOT)/lib -L$(SIM_ROOT)/decoder_lib/ -L$(SIM_ROOT)/sift -L$(XED_HOME)/lib -L$(SIM_ROOT)/libtorch/lib
 

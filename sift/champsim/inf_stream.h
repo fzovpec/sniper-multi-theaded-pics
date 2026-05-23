@@ -20,9 +20,24 @@
 #include <bzlib.h>
 #include <cassert>
 #include <iostream>
-#include <lzma.h>
 #include <memory>
 #include <zlib.h>
+
+#ifndef CHAMPSIM_HAS_LZMA
+#if defined(__has_include)
+#if __has_include(<lzma.h>)
+#define CHAMPSIM_HAS_LZMA 1
+#else
+#define CHAMPSIM_HAS_LZMA 0
+#endif
+#else
+#define CHAMPSIM_HAS_LZMA 1
+#endif
+#endif
+
+#if CHAMPSIM_HAS_LZMA
+#include <lzma.h>
+#endif
 
 namespace champsim
 {
@@ -129,6 +144,7 @@ struct gzip_tag_t {
   }
 };
 
+#if CHAMPSIM_HAS_LZMA
 template <uint32_t flags = 0>
 struct lzma_tag_t {
   using state_type = lzma_stream;
@@ -180,6 +196,7 @@ struct lzma_tag_t {
     return state;
   }
 };
+#endif
 } // namespace decomp_tags
 
 template <typename Tag, typename StreamType = std::ifstream>

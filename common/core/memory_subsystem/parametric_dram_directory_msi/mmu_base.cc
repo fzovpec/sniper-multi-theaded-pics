@@ -15,6 +15,8 @@
 #include "config.hpp"
 #include "sim_log.h"
 
+#include <algorithm>
+
 #include "debug_config.h"
 
 // ============================================================================
