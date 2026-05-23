@@ -35,6 +35,19 @@ A good starting point is <https://snipersim.org/w/Getting_Started>, and for
 more information about building the simulator and usage, please see 
 <https://snipersim.org/w/Manual>.
 
+For a minimal post-build smoke test, the following commands have been verified
+to run successfully:
+
+```bash
+./run-sniper -n 1 --fast-forward -d /tmp/sniper-smoke-$$ -caddress_translation_schemes/baseline -- /bin/true
+
+./run-sniper -n 1 -d /tmp/sniper-smoke-$$ -caddress_translation_schemes/baseline -- /bin/true
+```
+
+In the current environment, both the fast-forward and detailed runs complete
+and generate output successfully with the baseline address-translation
+configuration.
+
 ## Publications
 
 If you are using Sniper, please let us know by posting a message on

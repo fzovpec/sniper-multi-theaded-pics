@@ -11,12 +11,27 @@
 Instruction::StaticInstructionCosts Instruction::m_instruction_costs;
 
 Instruction::Instruction(InstructionType type, OperandList &operands)
-    : m_type(type), m_uops(NULL), m_addr(0), m_PICS_d(new PICS_d), m_PICS_c(new PICS_c), m_operands(operands)
+   : m_type(type)
+   , m_uops(NULL)
+   , m_addr(0)
+   , m_size(0)
+   , m_atomic(false)
+   , m_dynamic(false)
+   , m_PICS_d(new PICS_d)
+   , m_PICS_c(new PICS_c)
+   , m_operands(operands)
 {
 }
 
 Instruction::Instruction(InstructionType type)
-    : m_type(type), m_uops(NULL), m_addr(0), m_PICS_d(new PICS_d), m_PICS_c(new PICS_c)
+   : m_type(type)
+   , m_uops(NULL)
+   , m_addr(0)
+   , m_size(0)
+   , m_PICS_d(new PICS_d)
+   , m_PICS_c(new PICS_c)
+   , m_atomic(false)
+   , m_dynamic(false)
 {
 }
 
