@@ -125,6 +125,45 @@ void FrontendSyscallModelBase <T>::doSyscall
          // Handle SYS_clone child tid capture for proper pthread_join emulation.
          // When the CLONE_CHILD_CLEARTID option is enabled, remember its child_tidptr and
          // then when the thread ends, write 0 to the tid mutex and futex_wake it
+         case SYS_clone3:
+         {
+            struct clone_args_sniper* clone3_args = (struct clone_args_sniper*)args[0];
+            if (clone3_args && (clone3_args->flags & CLONE_THREAD))
+            {
+               addr_t tidptr = clone3_args->child_tid ? clone3_args->child_tid : clone3_args->parent_tid;
+               if (m_options->get_verbose())
+               {
+                  std::cerr << "[FRONTEND] Clone3 thread: going to acquire lock" << std::endl;
+               }
+               m_new_threadid_lock->acquire_lock(threadid);
+               if (m_options->get_verbose())
+               {
+                  std::cerr << "[FRONTEND] Clone3 thread: pushing back tidptr" << std::endl;
+               }
+               tidptrs->push_back(tidptr);
+               if (m_options->get_verbose())
+               {
+                  std::cerr << "[FRONTEND] Clone3 thread: going to release lock" << std::endl;
+               }
+               m_new_threadid_lock->release_lock();
+               if (m_options->get_verbose())
+               {
+                  std::cerr << "[FRONTEND] Clone3 thread: going to create new thread" << std::endl;
+               }
+               /* New thread */
+               m_thread_data[threadid].output->NewThread();
+               if (m_options->get_verbose())
+               {
+                  std::cerr << "[FRONTEND] New thread created" << std::endl;
+               }
+            }
+            else
+            {
+               /* New process */
+               // Nothing to do there, handled in fork()
+            }
+            break;
+         }
          case SYS_clone:
          {
             if (args[0] & CLONE_THREAD)

@@ -164,6 +164,10 @@ int izstream::peek()
 #endif /*SIFT_USE_ZLIB*/
 
 #include <cstdio>
+#include <cerrno>
+#include <cstring>
+#include <unistd.h>
+
 cvifstream::cvifstream(const char * filename, std::ios_base::openmode mode)
 {
 	std::string mode_str;
@@ -179,6 +183,21 @@ cvifstream::cvifstream(const char * filename, std::ios_base::openmode mode)
 		assert(false);
 
 	this->stream = std::fopen(filename, mode_str.c_str());
+	if (this->stream == NULL && (mode & std::ios_base::in))
+	{
+		// The FIFO might not have been created yet by the backend.
+		// Retry for up to 10 seconds (1000 * 10ms)
+		for (int retries = 0; retries < 1000 && this->stream == NULL; ++retries)
+		{
+			usleep(10000);
+			this->stream = std::fopen(filename, mode_str.c_str());
+		}
+	}
+	if (this->stream == NULL)
+	{
+		fprintf(stderr, "[SIFT] cvifstream: failed to open '%s' (mode '%s'): %s (errno=%d)\n",
+		        filename, mode_str.c_str(), strerror(errno), errno);
+	}
 	assert(this->stream != NULL);
 	this->buffer_in_use = false;
 }
@@ -201,8 +220,30 @@ void cvifstream::read(char* s, std::streamsize n)
 	}
 	if(nr_to_read > 0)
     {
-		ssize_t num_read = std::fread(start_buffer, sizeof(char), nr_to_read, this->stream);
-		assert(num_read == n || std::ferror(this->stream) == 0);
+		size_t total_read = 0;
+		while (total_read < nr_to_read)
+		{
+			size_t num_read = std::fread(start_buffer + total_read, sizeof(char), nr_to_read - total_read, this->stream);
+			total_read += num_read;
+			if (total_read == nr_to_read)
+				break;
+			if (std::ferror(this->stream))
+			{
+				int err = errno;
+				if (err == EINTR || err == EAGAIN)
+				{
+					std::clearerr(this->stream);
+					continue;
+				}
+				fprintf(stderr, "[SIFT] cvifstream::read: error on '%zu/%zu' bytes: %s (errno=%d)\n",
+				        total_read, nr_to_read, strerror(err), err);
+				assert(false);
+			}
+			if (std::feof(this->stream))
+			{
+				break;
+			}
+		}
 	}
 }
 
