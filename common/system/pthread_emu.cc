@@ -1,6 +1,7 @@
 #include "simulator.h"
 #include "core_manager.h"
 #include "pthread_emu.h"
+#include "thread.h"
 #include "thread_manager.h"
 #include "performance_model.h"
 #include "sync_api.h"
@@ -137,6 +138,17 @@ IntPtr MutexLock (pthread_mutex_t *mux)
    updateState(core, STATE_INREGION, delay + lat.latency + lat1.latency);
 
    pthreadCount(PTHREAD_MUTEX_LOCK, core, delay, lat.latency + lat1.latency);
+
+   UInt64 total_ns = (delay + lat.latency + lat1.latency).getNS();
+   Thread *curr_thread = Sim()->getThreadManager()->getCurrentThread();
+   if (curr_thread)
+   {
+      curr_thread->addLockWaitTime(delay + lat.latency + lat1.latency);
+   }
+   printf("[LOCK ACQUISITION] Core %d: lock acquisition took %" PRIu64 " ns (contention delay: %" PRIu64 " ns, mutex %p)\n",
+          core->getId(), total_ns, delay.getNS(), (void*)mux);
+   fflush(stdout);
+
    return 0;
 }
 

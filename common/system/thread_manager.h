@@ -103,6 +103,8 @@ private:
 
    Thread* createThread_unlocked(app_id_t app_id, thread_id_t creator_thread_id);
    void wakeUpWaiter(thread_id_t thread_id, SubsecondTime time);
+   void updateAllThreadStats();
+   static SInt64 hook_pre_stat_write(UInt64 user, UInt64 arg) { ((ThreadManager*)user)->updateAllThreadStats(); return 0; }
 };
 
 #endif // THREAD_MANAGER_H

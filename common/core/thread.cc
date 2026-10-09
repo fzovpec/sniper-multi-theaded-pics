@@ -8,6 +8,7 @@
 #include "instruction.h"
 #include "routine_tracer.h"
 #include "config.hpp"
+#include "stats.h"
 
 Thread::Thread(thread_id_t thread_id, app_id_t app_id)
    : m_thread_id(thread_id)
@@ -16,12 +17,21 @@ Thread::Thread(thread_id_t thread_id, app_id_t app_id)
    , m_rtn_tracer(NULL)
    , m_va2pa_func(NULL)
    , m_va2pa_arg(0)
+   , m_start_time(SubsecondTime::Zero())
+   , m_lock_wait_time(SubsecondTime::Zero())
+   , m_total_time_ns(0)
+   , m_lock_wait_time_ns(0)
+   , m_base_time_ns(0)
 {
    m_syscall_model = new SyscallMdl(this);
    m_sync_client = new SyncClient(this);
    if (Sim()->getRoutineTracer())
       m_rtn_tracer = Sim()->getRoutineTracer()->getThreadHandler(this);
    memset(&m_os_info, 0, sizeof(m_os_info));
+
+   registerStatsMetric("thread", m_thread_id, "total_time_ns", &m_total_time_ns);
+   registerStatsMetric("thread", m_thread_id, "lock_acquisition_time_ns", &m_lock_wait_time_ns);
+   registerStatsMetric("thread", m_thread_id, "base_time_ns", &m_base_time_ns);
 }
 
 Thread::~Thread()
@@ -85,4 +95,17 @@ bool Thread::updateCoreTLS(int threadIndex)
    }
    else
       return false;
+}
+
+void Thread::updateLiveStats()
+{
+   if (m_start_time > SubsecondTime::Zero())
+   {
+      Core *core = getCore();
+      SubsecondTime time = core ? core->getPerformanceModel()->getElapsedTime() : m_start_time;
+      SubsecondTime total_time = (time > m_start_time) ? (time - m_start_time) : SubsecondTime::Zero();
+      SubsecondTime lock_time = m_lock_wait_time;
+      SubsecondTime base_time = (total_time > lock_time) ? (total_time - lock_time) : SubsecondTime::Zero();
+      updateStats(total_time, lock_time, base_time);
+   }
 }

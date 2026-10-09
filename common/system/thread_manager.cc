@@ -16,6 +16,7 @@
 #include "circular_log.h"
 
 #include <sys/syscall.h>
+#include <inttypes.h>
 #include "os_compat.h"
 
 const char* ThreadManager::stall_type_names[] = {
@@ -28,6 +29,7 @@ ThreadManager::ThreadManager()
    : m_thread_tls(TLS::create())
    , m_scheduler(Scheduler::create(this))
 {
+   Sim()->getHooksManager()->registerHook(HookType::HOOK_PRE_STAT_WRITE, hook_pre_stat_write, (UInt64)this, HooksManager::ORDER_NOTIFY_PRE);
 }
 
 ThreadManager::~ThreadManager()
@@ -138,6 +140,8 @@ void ThreadManager::onThreadStart(thread_id_t thread_id, SubsecondTime time)
       m_thread_state[thread_id].stalled_reason = STALL_UNSCHEDULED;
    }
 
+   thread->setStartTime(time);
+
    if (m_thread_state[thread_id].waiter != INVALID_THREAD_ID)
    {
       getThreadFromID(m_thread_state[thread_id].waiter)->signal(time);
@@ -159,6 +163,17 @@ void ThreadManager::onThreadExit(thread_id_t thread_id)
 
    assert(m_thread_state[thread_id].status == Core::RUNNING);
    m_thread_state[thread_id].status = Core::IDLE;
+
+   SubsecondTime start_time = thread->getStartTime();
+   SubsecondTime total_time = (time > start_time) ? (time - start_time) : SubsecondTime::Zero();
+   SubsecondTime lock_time = thread->getLockWaitTime();
+   SubsecondTime base_time = (total_time > lock_time) ? (total_time - lock_time) : SubsecondTime::Zero();
+
+   thread->updateStats(total_time, lock_time, base_time);
+
+   printf("[THREAD STATS] Thread %d (core %d): Total time = %" PRIu64 " ns | Lock acquisition time = %" PRIu64 " ns | Base working time = %" PRIu64 " ns\n",
+          thread_id, core->getId(), total_time.getNS(), lock_time.getNS(), base_time.getNS());
+   fflush(stdout);
 
    // Implement pthread_join
    wakeUpWaiter(thread_id, time);
@@ -401,4 +416,18 @@ bool ThreadManager::anyThreadRunning()
          return true;
    }
    return false;
+}
+
+void ThreadManager::updateAllThreadStats()
+{
+   ScopedLock sl(m_thread_lock);
+   for (thread_id_t tid = 0; tid < (thread_id_t)m_thread_state.size(); tid++)
+   {
+      if (m_thread_state[tid].status != Core::IDLE)
+      {
+         Thread *thread = getThreadFromID(tid);
+         if (thread)
+            thread->updateLiveStats();
+      }
+   }
 }

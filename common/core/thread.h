@@ -28,6 +28,11 @@ class Thread
       RoutineTracerThread *m_rtn_tracer;
       va2pa_func_t m_va2pa_func;
       UInt64 m_va2pa_arg;
+      SubsecondTime m_start_time;
+      SubsecondTime m_lock_wait_time;
+      UInt64 m_total_time_ns;
+      UInt64 m_lock_wait_time_ns;
+      UInt64 m_base_time_ns;
 
    public:
       Thread(thread_id_t thread_id, app_id_t app_id);
@@ -79,6 +84,23 @@ class Thread
       bool updateCoreTLS(int threadIndex = -1);
 
       SyscallMdl *getSyscallMdl() { return m_syscall_model; }
+
+      void setStartTime(SubsecondTime time) { m_start_time = time; }
+      SubsecondTime getStartTime() const { return m_start_time; }
+      void addLockWaitTime(SubsecondTime time)
+      {
+         m_lock_wait_time += time;
+         m_lock_wait_time_ns = m_lock_wait_time.getNS();
+      }
+      SubsecondTime getLockWaitTime() const { return m_lock_wait_time; }
+
+      void updateStats(SubsecondTime total_time, SubsecondTime lock_time, SubsecondTime base_time)
+      {
+         m_total_time_ns = total_time.getNS();
+         m_lock_wait_time_ns = lock_time.getNS();
+         m_base_time_ns = base_time.getNS();
+      }
+      void updateLiveStats();
 };
 
 #endif // __THREAD_H

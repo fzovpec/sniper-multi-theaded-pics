@@ -401,8 +401,11 @@ IntPtr SyscallMdl::handleFutexCall(syscall_args_t &args)
 
    if ((cmd == FUTEX_WAIT || cmd == FUTEX_WAIT_BITSET))
    {
-      printf("[MUTEX] Thread %d resumed after waiting on mutex %p for %" PRIu64 " ns\n",
-             m_thread->getId(), (void*)fargs.uaddr, (end_time - start_time).getNS());
+      SubsecondTime wait_time = end_time - start_time;
+      m_thread->addLockWaitTime(wait_time);
+      UInt64 wait_ns = wait_time.getNS();
+      printf("[LOCK ACQUISITION] Thread %d (core %d): lock acquisition took %" PRIu64 " ns (mutex %p)\n",
+             m_thread->getId(), core->getId(), wait_ns, (void*)fargs.uaddr);
       fflush(stdout);
    }
 
