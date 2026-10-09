@@ -6,9 +6,13 @@
 
 // Early versions of Pin and SDE do not include clone3 support
 
-#if !defined(SYS_clone3)
+#if !defined(SYS_clone3_sniper)
+#if defined(SYS_clone3)
+#define SYS_clone3_sniper SYS_clone3
+#else
 // x86_64 specific
 #define SYS_clone3_sniper 435
+#endif
 #endif
 
 #if !defined(clone_args)

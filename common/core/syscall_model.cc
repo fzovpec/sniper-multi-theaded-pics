@@ -153,6 +153,11 @@ bool SyscallMdl::runEnter(IntPtr syscall_number, syscall_args_t &args)
       }
 
       case SYS_read:
+         if ((int)args.arg0 != STDIN_FILENO)
+         {
+            break;
+         }
+         // fallthrough for stdin
       case SYS_pause:
       case SYS_select:
       case SYS_poll:
@@ -376,7 +381,30 @@ IntPtr SyscallMdl::handleFutexCall(syscall_args_t &args)
 
    updateState(core, PthreadEmu::STATE_WAITING);
 
+   // Print a message when a mutex is contended. An uncontended pthread_mutex_lock is a single
+   // atomic instruction in user space and never reaches the simulator; only when the mutex is
+   // already held does glibc issue a FUTEX_WAIT syscall (and FUTEX_WAKE on unlock with waiters).
+   if (cmd == FUTEX_WAIT || cmd == FUTEX_WAIT_BITSET)
+   {
+      printf("[MUTEX] Thread %d (core %d) blocked: mutex %p is locked (t = %" PRIu64 " ns)\n",
+             m_thread->getId(), core->getId(), (void*)fargs.uaddr, start_time.getNS());
+      fflush(stdout);
+   }
+   else if (cmd == FUTEX_WAKE || cmd == FUTEX_WAKE_BITSET)
+   {
+      printf("[MUTEX] Thread %d (core %d) unlocked mutex %p, waking waiters (t = %" PRIu64 " ns)\n",
+             m_thread->getId(), core->getId(), (void*)fargs.uaddr, start_time.getNS());
+      fflush(stdout);
+   }
+
    IntPtr ret_val = Sim()->getSyscallServer()->handleFutexCall(m_thread->getId(), fargs, start_time, end_time);
+
+   if ((cmd == FUTEX_WAIT || cmd == FUTEX_WAIT_BITSET))
+   {
+      printf("[MUTEX] Thread %d resumed after waiting on mutex %p for %" PRIu64 " ns\n",
+             m_thread->getId(), (void*)fargs.uaddr, (end_time - start_time).getNS());
+      fflush(stdout);
+   }
 
    if (m_thread->reschedule(end_time, core))
       core = m_thread->getCore();

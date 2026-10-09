@@ -105,10 +105,10 @@ VOID emulateSyscallFunc(THREADID threadid, CONTEXT *ctxt)
          // then when the thread ends, write 0 to the tid mutex and futex_wake it
          case SYS_clone3_sniper:
          {
-            if (args[0] && CLONE_THREAD)
+            struct clone_args_sniper clone3_args;
+            if (args[0] && PIN_SafeCopy(&clone3_args, (void*)args[0], sizeof(clone3_args)) == sizeof(clone3_args) && (clone3_args.flags & CLONE_THREAD))
             {
-               struct clone_args_sniper* clone3_args = (struct clone_args_sniper*)args[0];
-               ADDRINT tidptr = clone3_args->parent_tid;
+               ADDRINT tidptr = clone3_args.child_tid ? clone3_args.child_tid : clone3_args.parent_tid;
                PIN_GetLock(&new_threadid_lock, threadid);
                tidptrs.push_back(tidptr);
                PIN_ReleaseLock(&new_threadid_lock);

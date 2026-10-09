@@ -213,6 +213,7 @@ class TraceThread : public Runnable
       UInt64 getProgressExpect();
       UInt64 getProgressValue();
       void frontEndStop(); //Ask all trace_threads to send signal to front-end to shutdown
+      void writeDIPs();
 
       Thread* getThread() const { return m_thread; }
       bool getVirtuosApp() { return m_virtuos_app; }
