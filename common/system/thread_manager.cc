@@ -141,6 +141,7 @@ void ThreadManager::onThreadStart(thread_id_t thread_id, SubsecondTime time)
    }
 
    thread->setStartTime(time);
+   Sim()->getStatsManager()->recordSyncEvent(thread_id, "thread_start", time.getNS());
 
    if (m_thread_state[thread_id].waiter != INVALID_THREAD_ID)
    {
@@ -165,6 +166,7 @@ void ThreadManager::onThreadExit(thread_id_t thread_id)
    m_thread_state[thread_id].status = Core::IDLE;
 
    SubsecondTime start_time = thread->getStartTime();
+   Sim()->getStatsManager()->recordSyncEvent(thread_id, "thread_end", time.getNS());
    SubsecondTime total_time = (time > start_time) ? (time - start_time) : SubsecondTime::Zero();
    SubsecondTime lock_time = thread->getLockWaitTime();
    SubsecondTime base_time = (total_time > lock_time) ? (total_time - lock_time) : SubsecondTime::Zero();

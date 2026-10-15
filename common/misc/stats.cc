@@ -31,6 +31,10 @@ const char *db_create_stmts[] = {
    // PICS
    "CREATE TABLE `pics_d` (addr TEXT, instr_type TEXT, base REAL, fe_stall REAL, be_stall REAL, mispred REAL);",
    "CREATE TABLE `pics_c` (addr TEXT, instr_type TEXT, compute REAL, drained REAL, stalled REAL, flushed REAL);",
+   // Thread Phases
+   "CREATE TABLE `thread_phases` (thread_id INTEGER, phase_type TEXT, start_time_ns INTEGER, end_time_ns INTEGER, duration_ns INTEGER);",
+   // Synchronization Events (Lock & Unlock times)
+   "CREATE TABLE `sync_events` (thread_id INTEGER, event_type TEXT, time_ns INTEGER);",
    // Other users
    "CREATE TABLE `topology` (componentname TEXT, coreid INTEGER, masterid INTEGER);",
    "CREATE TABLE `event` (event INTEGER, time INTEGER, core INTEGER, thread INTEGER, value0 INTEGER, value1 INTEGER, description TEXT);",
@@ -40,6 +44,8 @@ const char db_insert_stmt_prefix[] = "INSERT INTO `prefixes` (prefixid, prefixna
 const char db_insert_stmt_value[] = "INSERT INTO `values` (prefixid, nameid, core, value) VALUES (?, ?, ?, ?);";
 const char db_insert_stmt_picsd[] = "INSERT INTO `pics_d` (addr, instr_type, base, fe_stall, be_stall, mispred) VALUES (?, ?, ?, ?, ?, ?);";
 const char db_insert_stmt_picsc[] = "INSERT INTO `pics_c` (addr, instr_type, compute, drained, stalled, flushed) VALUES (?, ?, ?, ?, ?, ?);";
+const char db_insert_stmt_phase[] = "INSERT INTO `thread_phases` (thread_id, phase_type, start_time_ns, end_time_ns, duration_ns) VALUES (?, ?, ?, ?, ?);";
+const char db_insert_stmt_sync_event[] = "INSERT INTO `sync_events` (thread_id, event_type, time_ns) VALUES (?, ?, ?);";
 
 UInt64 getWallclockTimeCallback(String objectName, UInt32 index, String metricName, UInt64 arg)
 {
@@ -329,3 +335,54 @@ StatsManager::recordPicsC(unsigned long address, const char* instr_type, PICS_c*
    res = sqlite3_step(m_stmt_insert_picsc);
    LOG_ASSERT_ERROR(res == SQLITE_DONE, "Error executing SQL statement: %s", sqlite3_errmsg(m_db));
 }
+
+static pthread_mutex_t s_phase_lock = PTHREAD_MUTEX_INITIALIZER;
+
+void StatsManager::recordThreadPhase(thread_id_t thread_id, const char *phase_type, UInt64 start_time_ns, UInt64 end_time_ns)
+{
+   if (!m_db)
+      return;
+
+   pthread_mutex_lock(&s_phase_lock);
+
+   UInt64 duration_ns = (end_time_ns >= start_time_ns) ? (end_time_ns - start_time_ns) : 0;
+   sqlite3_stmt *stmt = NULL;
+   int res = sqlite3_prepare(m_db, db_insert_stmt_phase, -1, &stmt, NULL);
+   if (res == SQLITE_OK && stmt)
+   {
+      sqlite3_bind_int(stmt, 1, thread_id);
+      sqlite3_bind_text(stmt, 2, phase_type, -1, SQLITE_TRANSIENT);
+      sqlite3_bind_int64(stmt, 3, start_time_ns);
+      sqlite3_bind_int64(stmt, 4, end_time_ns);
+      sqlite3_bind_int64(stmt, 5, duration_ns);
+      res = sqlite3_step(stmt);
+      LOG_ASSERT_ERROR(res == SQLITE_DONE, "Error executing SQL statement: %s", sqlite3_errmsg(m_db));
+      sqlite3_finalize(stmt);
+   }
+
+   pthread_mutex_unlock(&s_phase_lock);
+}
+
+void StatsManager::recordSyncEvent(thread_id_t thread_id, const char *event_type, UInt64 time_ns)
+{
+   if (!m_db)
+      return;
+
+   pthread_mutex_lock(&s_phase_lock);
+
+   sqlite3_stmt *stmt = NULL;
+   int res = sqlite3_prepare(m_db, db_insert_stmt_sync_event, -1, &stmt, NULL);
+   if (res == SQLITE_OK && stmt)
+   {
+      sqlite3_bind_int(stmt, 1, thread_id);
+      sqlite3_bind_text(stmt, 2, event_type, -1, SQLITE_TRANSIENT);
+      sqlite3_bind_int64(stmt, 3, time_ns);
+      res = sqlite3_step(stmt);
+      LOG_ASSERT_ERROR(res == SQLITE_DONE, "Error executing SQL statement: %s", sqlite3_errmsg(m_db));
+      sqlite3_finalize(stmt);
+   }
+
+   pthread_mutex_unlock(&s_phase_lock);
+}
+
+

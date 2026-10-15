@@ -139,11 +139,14 @@ IntPtr MutexLock (pthread_mutex_t *mux)
 
    pthreadCount(PTHREAD_MUTEX_LOCK, core, delay, lat.latency + lat1.latency);
 
-   UInt64 total_ns = (delay + lat.latency + lat1.latency).getNS();
+   SubsecondTime wait_time = delay + lat.latency + lat1.latency;
+   UInt64 total_ns = wait_time.getNS();
    Thread *curr_thread = Sim()->getThreadManager()->getCurrentThread();
    if (curr_thread)
    {
-      curr_thread->addLockWaitTime(delay + lat.latency + lat1.latency);
+      curr_thread->addLockWaitTime(wait_time);
+      SubsecondTime lock_time = core->getPerformanceModel()->getElapsedTime() + wait_time;
+      Sim()->getStatsManager()->recordSyncEvent(curr_thread->getId(), "lock", lock_time.getNS());
    }
    printf("[LOCK ACQUISITION] Core %d: lock acquisition took %" PRIu64 " ns (contention delay: %" PRIu64 " ns, mutex %p)\n",
           core->getId(), total_ns, delay.getNS(), (void*)mux);
@@ -196,6 +199,11 @@ IntPtr MutexUnlock (pthread_mutex_t *mux)
    updateState(core, STATE_RUNNING, delay + lat.latency + lat1.latency);
 
    pthreadCount(PTHREAD_MUTEX_UNLOCK, core, delay, lat.latency + lat1.latency);
+
+   Thread *curr_thread = Sim()->getThreadManager()->getCurrentThread();
+   if (curr_thread)
+      Sim()->getStatsManager()->recordSyncEvent(curr_thread->getId(), "unlock", core->getPerformanceModel()->getElapsedTime().getNS());
+
    return 0;
 }
 

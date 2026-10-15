@@ -30,6 +30,7 @@ class Thread
       UInt64 m_va2pa_arg;
       SubsecondTime m_start_time;
       SubsecondTime m_lock_wait_time;
+      bool m_started;
       UInt64 m_total_time_ns;
       UInt64 m_lock_wait_time_ns;
       UInt64 m_base_time_ns;
@@ -85,7 +86,11 @@ class Thread
 
       SyscallMdl *getSyscallMdl() { return m_syscall_model; }
 
-      void setStartTime(SubsecondTime time) { m_start_time = time; }
+      void setStartTime(SubsecondTime time)
+      {
+         m_start_time = time;
+         m_started = true;
+      }
       SubsecondTime getStartTime() const { return m_start_time; }
       void addLockWaitTime(SubsecondTime time)
       {

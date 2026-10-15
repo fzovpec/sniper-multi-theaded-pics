@@ -395,6 +395,7 @@ IntPtr SyscallMdl::handleFutexCall(syscall_args_t &args)
       printf("[MUTEX] Thread %d (core %d) unlocked mutex %p, waking waiters (t = %" PRIu64 " ns)\n",
              m_thread->getId(), core->getId(), (void*)fargs.uaddr, start_time.getNS());
       fflush(stdout);
+      Sim()->getStatsManager()->recordSyncEvent(m_thread->getId(), "unlock", start_time.getNS());
    }
 
    IntPtr ret_val = Sim()->getSyscallServer()->handleFutexCall(m_thread->getId(), fargs, start_time, end_time);
@@ -403,6 +404,7 @@ IntPtr SyscallMdl::handleFutexCall(syscall_args_t &args)
    {
       SubsecondTime wait_time = end_time - start_time;
       m_thread->addLockWaitTime(wait_time);
+      Sim()->getStatsManager()->recordSyncEvent(m_thread->getId(), "lock", end_time.getNS());
       UInt64 wait_ns = wait_time.getNS();
       printf("[LOCK ACQUISITION] Thread %d (core %d): lock acquisition took %" PRIu64 " ns (mutex %p)\n",
              m_thread->getId(), core->getId(), wait_ns, (void*)fargs.uaddr);

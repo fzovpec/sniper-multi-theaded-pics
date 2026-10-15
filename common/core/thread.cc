@@ -19,6 +19,7 @@ Thread::Thread(thread_id_t thread_id, app_id_t app_id)
    , m_va2pa_arg(0)
    , m_start_time(SubsecondTime::Zero())
    , m_lock_wait_time(SubsecondTime::Zero())
+   , m_started(false)
    , m_total_time_ns(0)
    , m_lock_wait_time_ns(0)
    , m_base_time_ns(0)
@@ -99,7 +100,7 @@ bool Thread::updateCoreTLS(int threadIndex)
 
 void Thread::updateLiveStats()
 {
-   if (m_start_time > SubsecondTime::Zero())
+   if (m_started)
    {
       Core *core = getCore();
       SubsecondTime time = core ? core->getPerformanceModel()->getElapsedTime() : m_start_time;
@@ -109,3 +110,5 @@ void Thread::updateLiveStats()
       updateStats(total_time, lock_time, base_time);
    }
 }
+
+
