@@ -1,4 +1,4 @@
-﻿/*
+/*
  * This file is covered under the Interval Academic License, see LICENCE.academic
  */
 
@@ -13,10 +13,14 @@
 #include "core_model.h"
 #include "rob_contention.h"
 #include "instruction.h"
+#include "sync_tracker.h"
+#include "thread.h"
 
 #include <iostream>
 #include <sstream>
 #include <iomanip>
+#include <cstdio>
+#include <inttypes.h>
 
 // Define to get per-cycle printout of dispatch, issue, writeback stages
 // #define DEBUG_PERCYCLE
@@ -941,7 +945,19 @@ SubsecondTime RobTimer::doCommit(uint64_t &instructionsExecuted)
       m_core->getPerformanceModel()->traceInstruction(entry->uop, &times);
 
       if (entry->uop->isLast())
+      {
          instructionsExecuted++;
+         fflush(stdout);
+
+         Instruction *ins = uop.getMicroOp()->getInstruction();
+         if (ins)
+         {
+            SubsecondTime sub_now = now;
+            IntPtr mem_addr = uop.getAddress().address;
+            thread_id_t tid = m_core->getThread() ? m_core->getThread()->getId() : m_core->getId();
+            SyncTracker::onInstructionCommit(tid, ins, sub_now, mem_addr);
+         }
+      }
 
       if (curr_pics)
       {

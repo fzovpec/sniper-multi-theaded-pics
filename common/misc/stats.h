@@ -90,7 +90,7 @@ public:
       void recordPicsD(unsigned long address, const char* instr_type, PICS_d *stack);
       void recordPicsC(unsigned long address, const char* instr_type, PICS_c *stack);
       void recordThreadPhase(thread_id_t thread_id, const char *phase_type, UInt64 start_time_ns, UInt64 end_time_ns);
-      void recordSyncEvent(thread_id_t thread_id, const char *event_type, UInt64 time_ns);
+      void recordSyncEvent(thread_id_t thread_id, const char *event_type, UInt64 time_ns, IntPtr lock_address = 0);
 
 private:
    UInt64 m_keyid;

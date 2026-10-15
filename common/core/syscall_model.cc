@@ -15,6 +15,8 @@
 #include "syscall_strings.h"
 #include "circular_log.h"
 
+#include "sync_tracker.h"
+
 #include <errno.h>
 #include <sys/syscall.h>
 #include <linux/futex.h>
@@ -381,21 +383,41 @@ IntPtr SyscallMdl::handleFutexCall(syscall_args_t &args)
 
    updateState(core, PthreadEmu::STATE_WAITING);
 
+   bool is_thread_join = false;
+   UInt64 num_threads = Sim()->getThreadManager()->getNumThreads();
+   for (thread_id_t tid = 0; tid < (thread_id_t)num_threads; ++tid)
+   {
+      Thread *t = Sim()->getThreadManager()->getThreadFromID(tid);
+      if (t && t->m_os_info.tid_ptr != 0 && (IntPtr)fargs.uaddr == t->m_os_info.tid_ptr)
+      {
+         is_thread_join = true;
+         break;
+      }
+   }
+
    // Print a message when a mutex is contended. An uncontended pthread_mutex_lock is a single
    // atomic instruction in user space and never reaches the simulator; only when the mutex is
    // already held does glibc issue a FUTEX_WAIT syscall (and FUTEX_WAKE on unlock with waiters).
    if (cmd == FUTEX_WAIT || cmd == FUTEX_WAIT_BITSET)
    {
-      printf("[MUTEX] Thread %d (core %d) blocked: mutex %p is locked (t = %" PRIu64 " ns)\n",
-             m_thread->getId(), core->getId(), (void*)fargs.uaddr, start_time.getNS());
-      fflush(stdout);
+      if (!is_thread_join)
+      {
+         printf("[MUTEX] Thread %d (core %d) blocked: mutex %p is locked (t = %" PRIu64 " ns)\n",
+                m_thread->getId(), core->getId(), (void*)fargs.uaddr, start_time.getNS());
+         fflush(stdout);
+         Sim()->getStatsManager()->recordSyncEvent(m_thread->getId(), "begin_lock_acquisition", start_time.getNS(), (IntPtr)fargs.uaddr);
+         SyncTracker::onThreadWaitStart(m_thread->getId(), start_time, (IntPtr)fargs.uaddr);
+      }
    }
    else if (cmd == FUTEX_WAKE || cmd == FUTEX_WAKE_BITSET)
    {
-      printf("[MUTEX] Thread %d (core %d) unlocked mutex %p, waking waiters (t = %" PRIu64 " ns)\n",
-             m_thread->getId(), core->getId(), (void*)fargs.uaddr, start_time.getNS());
-      fflush(stdout);
-      Sim()->getStatsManager()->recordSyncEvent(m_thread->getId(), "unlock", start_time.getNS());
+      if (!is_thread_join)
+      {
+         printf("[MUTEX] Thread %d (core %d) unlocked mutex %p, waking waiters (t = %" PRIu64 " ns)\n",
+                m_thread->getId(), core->getId(), (void*)fargs.uaddr, start_time.getNS());
+         fflush(stdout);
+         SyncTracker::onUnlock(m_thread->getId(), start_time, (IntPtr)fargs.uaddr);
+      }
    }
 
    IntPtr ret_val = Sim()->getSyscallServer()->handleFutexCall(m_thread->getId(), fargs, start_time, end_time);
@@ -404,11 +426,16 @@ IntPtr SyscallMdl::handleFutexCall(syscall_args_t &args)
    {
       SubsecondTime wait_time = end_time - start_time;
       m_thread->addLockWaitTime(wait_time);
-      Sim()->getStatsManager()->recordSyncEvent(m_thread->getId(), "lock", end_time.getNS());
       UInt64 wait_ns = wait_time.getNS();
-      printf("[LOCK ACQUISITION] Thread %d (core %d): lock acquisition took %" PRIu64 " ns (mutex %p)\n",
-             m_thread->getId(), core->getId(), wait_ns, (void*)fargs.uaddr);
-      fflush(stdout);
+      if (!is_thread_join)
+      {
+         printf("[LOCK ACQUISITION] Thread %d (core %d): lock acquisition took %" PRIu64 " ns (mutex %p)\n",
+                m_thread->getId(), core->getId(), wait_ns, (void*)fargs.uaddr);
+         fflush(stdout);
+         Sim()->getStatsManager()->recordSyncEvent(m_thread->getId(), "end_lock_acquisition", end_time.getNS(), (IntPtr)fargs.uaddr);
+         SyncTracker::onThreadWaitEnd(m_thread->getId(), end_time);
+         SyncTracker::onLockAcquired(m_thread->getId(), end_time, (IntPtr)fargs.uaddr);
+      }
    }
 
    if (m_thread->reschedule(end_time, core))
