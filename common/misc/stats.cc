@@ -29,8 +29,8 @@ const char *db_create_stmts[] = {
     "CREATE INDEX `idx_value_prefix` ON `values`(`prefixid`);",
 
    // PICS
-   "CREATE TABLE `pics_d` (addr TEXT, instr_type TEXT, base REAL, fe_stall REAL, be_stall REAL, mispred REAL);",
-   "CREATE TABLE `pics_c` (addr TEXT, instr_type TEXT, compute REAL, drained REAL, stalled REAL, flushed REAL);",
+   "CREATE TABLE `pics_d` (addr TEXT, instr_type TEXT, base REAL, fe_stall REAL, be_stall REAL, mispred REAL, mt_wait REAL);",
+   "CREATE TABLE `pics_c` (addr TEXT, instr_type TEXT, compute REAL, drained REAL, stalled REAL, flushed REAL, mt_wait REAL);",
    // Thread Phases
    "CREATE TABLE `thread_phases` (thread_id INTEGER, phase_type TEXT, start_time_ns INTEGER, end_time_ns INTEGER, duration_ns INTEGER);",
    // Synchronization Events (Lock & Unlock times)
@@ -42,8 +42,8 @@ const char *db_create_stmts[] = {
 const char db_insert_stmt_name[] = "INSERT INTO `names` (nameid, objectname, metricname) VALUES (?, ?, ?);";
 const char db_insert_stmt_prefix[] = "INSERT INTO `prefixes` (prefixid, prefixname) VALUES (?, ?);";
 const char db_insert_stmt_value[] = "INSERT INTO `values` (prefixid, nameid, core, value) VALUES (?, ?, ?, ?);";
-const char db_insert_stmt_picsd[] = "INSERT INTO `pics_d` (addr, instr_type, base, fe_stall, be_stall, mispred) VALUES (?, ?, ?, ?, ?, ?);";
-const char db_insert_stmt_picsc[] = "INSERT INTO `pics_c` (addr, instr_type, compute, drained, stalled, flushed) VALUES (?, ?, ?, ?, ?, ?);";
+const char db_insert_stmt_picsd[] = "INSERT INTO `pics_d` (addr, instr_type, base, fe_stall, be_stall, mispred, mt_wait) VALUES (?, ?, ?, ?, ?, ?, ?);";
+const char db_insert_stmt_picsc[] = "INSERT INTO `pics_c` (addr, instr_type, compute, drained, stalled, flushed, mt_wait) VALUES (?, ?, ?, ?, ?, ?, ?);";
 const char db_insert_stmt_phase[] = "INSERT INTO `thread_phases` (thread_id, phase_type, start_time_ns, end_time_ns, duration_ns) VALUES (?, ?, ?, ?, ?);";
 const char db_insert_stmt_sync_event[] = "INSERT INTO `sync_events` (thread_id, event_type, time_ns, lock_address) VALUES (?, ?, ?, ?);";
 
@@ -294,6 +294,8 @@ void StatHist::print()
    printf(")\n");
 }
 
+static pthread_mutex_t s_phase_lock = PTHREAD_MUTEX_INITIALIZER;
+
 void
 StatsManager::recordPicsD(unsigned long address, const char* instr_type, PICS_d* stack)
 {
@@ -301,6 +303,8 @@ StatsManager::recordPicsD(unsigned long address, const char* instr_type, PICS_d*
 
    std::stringstream stream;
    stream << "0x" << std::hex << address;
+
+   pthread_mutex_lock(&s_phase_lock);
 
    sqlite3_reset(m_stmt_insert_picsd);
    sqlite3_clear_bindings(m_stmt_insert_picsd);
@@ -310,9 +314,12 @@ StatsManager::recordPicsD(unsigned long address, const char* instr_type, PICS_d*
    sqlite3_bind_double(m_stmt_insert_picsd, 4, std::round(stack->get_fe_stall_cyc() * 100.0) / 100.0);
    sqlite3_bind_double(m_stmt_insert_picsd, 5, std::round(stack->get_be_stall_cyc() * 100.0) / 100.0);
    sqlite3_bind_double(m_stmt_insert_picsd, 6, std::round(stack->get_mispred_cyc() * 100.0) / 100.0);
+   sqlite3_bind_double(m_stmt_insert_picsd, 7, std::round(stack->get_mt_wait_cyc() * 100.0) / 100.0);
 
    res = sqlite3_step(m_stmt_insert_picsd);
    LOG_ASSERT_ERROR(res == SQLITE_DONE, "Error executing SQL statement: %s", sqlite3_errmsg(m_db));
+
+   pthread_mutex_unlock(&s_phase_lock);
 }
 
 void
@@ -323,6 +330,8 @@ StatsManager::recordPicsC(unsigned long address, const char* instr_type, PICS_c*
    std::stringstream stream;
    stream << "0x" << std::hex << address;
 
+   pthread_mutex_lock(&s_phase_lock);
+
    sqlite3_reset(m_stmt_insert_picsc);
    sqlite3_clear_bindings(m_stmt_insert_picsc);
    sqlite3_bind_text(m_stmt_insert_picsc, 1, stream.str().c_str(), -1, SQLITE_TRANSIENT);
@@ -331,12 +340,13 @@ StatsManager::recordPicsC(unsigned long address, const char* instr_type, PICS_c*
    sqlite3_bind_double(m_stmt_insert_picsc, 4, std::round(stack->get_drained_cyc() * 10000000.0) / 10000000.0);
    sqlite3_bind_double(m_stmt_insert_picsc, 5, std::round(stack->get_stalled_cyc() * 10000000.0) / 10000000.0);
    sqlite3_bind_double(m_stmt_insert_picsc, 6, std::round(stack->get_flushed_cyc() * 10000000.0) / 10000000.0);
+   sqlite3_bind_double(m_stmt_insert_picsc, 7, std::round(stack->get_mt_wait_cyc() * 10000000.0) / 10000000.0);
 
    res = sqlite3_step(m_stmt_insert_picsc);
    LOG_ASSERT_ERROR(res == SQLITE_DONE, "Error executing SQL statement: %s", sqlite3_errmsg(m_db));
-}
 
-static pthread_mutex_t s_phase_lock = PTHREAD_MUTEX_INITIALIZER;
+   pthread_mutex_unlock(&s_phase_lock);
+}
 
 void StatsManager::recordThreadPhase(thread_id_t thread_id, const char *phase_type, UInt64 start_time_ns, UInt64 end_time_ns)
 {

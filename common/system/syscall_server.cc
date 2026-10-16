@@ -9,6 +9,7 @@
 #include "core_manager.h"
 #include "log.h"
 #include "circular_log.h"
+#include "sync_tracker.h"
 
 #include <sys/syscall.h>
 #include "os_compat.h"
@@ -133,7 +134,7 @@ IntPtr SyscallServer::futexWait(thread_id_t thread_id, int *uaddr, int val, int 
    LOG_PRINT("Futex Wait");
    SimFutex *sim_futex = findFutexByUaddr(uaddr, thread_id);
 
-   if (val != act_val)
+   if (val != act_val && !SyncTracker::isLockHeldByOther(thread_id, (IntPtr)uaddr))
    {
       end_time = curr_time;
       return -EWOULDBLOCK;

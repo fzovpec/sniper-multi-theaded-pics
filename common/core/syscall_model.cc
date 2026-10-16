@@ -24,6 +24,7 @@
 #include "os_compat.h"
 
 #include <boost/algorithm/string.hpp>
+#include <unordered_set>
 
 const char *SyscallMdl::futex_names[] =
 {
@@ -383,7 +384,12 @@ IntPtr SyscallMdl::handleFutexCall(syscall_args_t &args)
 
    updateState(core, PthreadEmu::STATE_WAITING);
 
-   bool is_thread_join = false;
+   static std::unordered_set<IntPtr> s_join_uaddrs;
+   bool is_thread_join = (cmd == FUTEX_WAIT_BITSET) || (s_join_uaddrs.count((IntPtr)fargs.uaddr) > 0);
+   if (cmd == FUTEX_WAIT_BITSET)
+   {
+      s_join_uaddrs.insert((IntPtr)fargs.uaddr);
+   }
    UInt64 num_threads = Sim()->getThreadManager()->getNumThreads();
    for (thread_id_t tid = 0; tid < (thread_id_t)num_threads; ++tid)
    {
@@ -408,6 +414,10 @@ IntPtr SyscallMdl::handleFutexCall(syscall_args_t &args)
          Sim()->getStatsManager()->recordSyncEvent(m_thread->getId(), "begin_lock_acquisition", start_time.getNS(), (IntPtr)fargs.uaddr);
          SyncTracker::onThreadWaitStart(m_thread->getId(), start_time, (IntPtr)fargs.uaddr);
       }
+      else
+      {
+         SyncTracker::onThreadBlock(m_thread->getId());
+      }
    }
    else if (cmd == FUTEX_WAKE || cmd == FUTEX_WAKE_BITSET)
    {
@@ -425,16 +435,19 @@ IntPtr SyscallMdl::handleFutexCall(syscall_args_t &args)
    if ((cmd == FUTEX_WAIT || cmd == FUTEX_WAIT_BITSET))
    {
       SubsecondTime wait_time = end_time - start_time;
-      m_thread->addLockWaitTime(wait_time);
       UInt64 wait_ns = wait_time.getNS();
       if (!is_thread_join)
       {
+         m_thread->addLockWaitTime(wait_time);
          printf("[LOCK ACQUISITION] Thread %d (core %d): lock acquisition took %" PRIu64 " ns (mutex %p)\n",
                 m_thread->getId(), core->getId(), wait_ns, (void*)fargs.uaddr);
          fflush(stdout);
-         Sim()->getStatsManager()->recordSyncEvent(m_thread->getId(), "end_lock_acquisition", end_time.getNS(), (IntPtr)fargs.uaddr);
          SyncTracker::onThreadWaitEnd(m_thread->getId(), end_time);
          SyncTracker::onLockAcquired(m_thread->getId(), end_time, (IntPtr)fargs.uaddr);
+      }
+      else
+      {
+         SyncTracker::onThreadUnblock(m_thread->getId());
       }
    }
 

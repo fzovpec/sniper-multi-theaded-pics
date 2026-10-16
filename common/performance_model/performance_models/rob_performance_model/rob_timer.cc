@@ -534,9 +534,10 @@ SubsecondTime RobTimer::doDispatch(SubsecondTime **cpiComponent)
             break;
          }
 
+         thread_id_t tid = m_core->getThread() ? m_core->getThread()->getId() : m_core->getId();
          entry->dispatched = now;
          if (account_dip)
-            curr_dip_stack->add_base(now.getPeriod() / dispatchWidth); // this period is constant
+            curr_dip_stack->add_base(SyncTracker::scaleTime(tid, now.getPeriod() / dispatchWidth)); // this period is constant
          ++m_num_in_rob;
          ++m_rs_entries_used;
 
@@ -610,6 +611,7 @@ SubsecondTime RobTimer::doDispatch(SubsecondTime **cpiComponent)
 
    // account for the base dispatch slots that are unaccounted for. If m_DMap is not empty, the uop in the map will
    // get the latency for these dispatch slots
+   thread_id_t disp_tid = m_core->getThread() ? m_core->getThread()->getId() : m_core->getId();
    for (auto entry = m_DMap.begin(); entry != m_DMap.end(); ++entry)
    {
       if (!entry->second->uop->getMicroOp()->getInstruction())
@@ -617,7 +619,9 @@ SubsecondTime RobTimer::doDispatch(SubsecondTime **cpiComponent)
          continue;
       }
       // calculate number of base slots that are unaccounted for
-      SubsecondTime base_latency = (static_cast<float>(dispatchWidth - uops_dispatched) / static_cast<float>(dispatchWidth)) * now.getPeriod();
+      SubsecondTime base_latency = SyncTracker::scaleTime(
+          disp_tid,
+          (static_cast<float>(dispatchWidth - uops_dispatched) / static_cast<float>(dispatchWidth)) * now.getPeriod());
 
       PICS_d *dip = entry->second->uop->getMicroOp()->getInstruction()->getPICS_d();
       switch (entry->first)
@@ -944,6 +948,18 @@ SubsecondTime RobTimer::doCommit(uint64_t &instructionsExecuted)
           now};
       m_core->getPerformanceModel()->traceInstruction(entry->uop, &times);
 
+      thread_id_t tid = m_core->getThread() ? m_core->getThread()->getId() : m_core->getId();
+
+      if (curr_pics)
+      {
+         curr_pics->add_compute(SyncTracker::scaleTime(tid, now.getPeriod() / commitWidth));
+
+         if (flushed = uop.getMicroOp()->isBranch() && uop.isBranchMispredicted())
+         {
+            m_CMap.insert({CComponent::FLUSHED, curr_pics});
+         }
+      }
+
       if (entry->uop->isLast())
       {
          instructionsExecuted++;
@@ -954,18 +970,7 @@ SubsecondTime RobTimer::doCommit(uint64_t &instructionsExecuted)
          {
             SubsecondTime sub_now = now;
             IntPtr mem_addr = uop.getAddress().address;
-            thread_id_t tid = m_core->getThread() ? m_core->getThread()->getId() : m_core->getId();
             SyncTracker::onInstructionCommit(tid, ins, sub_now, mem_addr);
-         }
-      }
-
-      if (curr_pics)
-      {
-         curr_pics->add_compute(now.getPeriod() / commitWidth);
-
-         if (flushed = uop.getMicroOp()->isBranch() && uop.isBranchMispredicted())
-         {
-            m_CMap.insert({CComponent::FLUSHED, curr_pics});
          }
       }
 
@@ -1004,11 +1009,14 @@ SubsecondTime RobTimer::doCommit(uint64_t &instructionsExecuted)
         }
    }
 
+   thread_id_t commit_tid = m_core->getThread() ? m_core->getThread()->getId() : m_core->getId();
    for (auto it = m_CMap.begin(); it != m_CMap.end(); ++it)
    {
       PICS_c *pics = it->second;
       // calculate number of base slots that are unaccounted for
-      SubsecondTime base_latency = (static_cast<float>(commitWidth - num_committed) / static_cast<float>(commitWidth)) * now.getPeriod();
+      SubsecondTime base_latency = SyncTracker::scaleTime(
+          commit_tid,
+          (static_cast<float>(commitWidth - num_committed) / static_cast<float>(commitWidth)) * now.getPeriod());
 
       switch (it->first)
       {
@@ -1110,6 +1118,9 @@ void RobTimer::execute(uint64_t &instructionsExecuted, SubsecondTime &latency)
    LOG_ASSERT_ERROR(cpiComponent != NULL, "We expected cpiComponent to be set by doDispatch, but it wasn't");
    *cpiComponent += latency;
 
+   thread_id_t exec_tid = m_core->getThread() ? m_core->getThread()->getId() : m_core->getId();
+   SubsecondTime extra_latency = SyncTracker::scaleTime(exec_tid, latency - now.getPeriod());
+
    for (auto entry = m_DMap.begin(); entry != m_DMap.end(); ++entry)
    {
       if (!entry->second->uop->getMicroOp()->getInstruction())
@@ -1121,15 +1132,15 @@ void RobTimer::execute(uint64_t &instructionsExecuted, SubsecondTime &latency)
       switch (entry->first)
       {
       case (DComponent::FRONT_END):
-         dip->add_fe_stall(latency - now.getPeriod());
+         dip->add_fe_stall(extra_latency);
          break;
 
       case (DComponent::BACK_END):
-         dip->add_be_stall(latency - now.getPeriod());
+         dip->add_be_stall(extra_latency);
          break;
 
       case (DComponent::MISPRED):
-         dip->add_mispred(latency - now.getPeriod());
+         dip->add_mispred(extra_latency);
          break;
       }
    }
@@ -1141,15 +1152,15 @@ void RobTimer::execute(uint64_t &instructionsExecuted, SubsecondTime &latency)
         switch (it->first)
         {
         case (CComponent::DRAINED):
-            pics->add_drained(latency - now.getPeriod());
+            pics->add_drained(extra_latency);
             break;
 
         case (CComponent::STALLED):
-            pics->add_stalled(latency - now.getPeriod());
+            pics->add_stalled(extra_latency);
             break;
 
         case (CComponent::FLUSHED):
-            pics->add_flushed(latency - now.getPeriod());
+            pics->add_flushed(extra_latency);
             break;
         }
     }

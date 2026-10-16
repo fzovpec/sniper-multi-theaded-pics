@@ -171,6 +171,7 @@ VOID emulateSyscallFunc(THREADID threadid, CONTEXT *ctxt)
             break;
 
          // System calls sent to Sniper, but also passed through to OS
+         case SYS_exit:
          case SYS_exit_group:
             thread_data[threadid].output->Syscall(syscall_number, (char*)args, sizeof(args));
             break;
