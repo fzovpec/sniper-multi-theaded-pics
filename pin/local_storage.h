@@ -4,7 +4,6 @@
 #define MAX_PIN_THREADS 2048
 
 #include "inst_mode.h"
-#include "spin_loop_detection.h"
 
 #include <vector>
 
@@ -23,9 +22,7 @@ struct ThreadLocalStorage
    {
       thread_id_t new_thread_id;
    } clone;
-   // State used by spin loop detection
-   SpinLoopDetectionState sld;
-   // Malloc tracker
+// Malloc tracker
    struct
    {
       ADDRINT eip;

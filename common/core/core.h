@@ -139,9 +139,22 @@ class Core
       void enablePerformanceModels();
       void disablePerformanceModels();
 
+      void recordSpinInstance()
+      {
+         m_spin_instances++;
+         m_spin_loops++;
+      }
+
       void updateSpinCount(UInt64 instructions, SubsecondTime elapsed_time)
       {
-         m_spin_loops++;
+         m_spin_iterations++;
+         m_spin_instructions += instructions;
+         m_spin_elapsed_time += elapsed_time;
+      }
+
+      void updateSpinCount(UInt64 iterations, UInt64 instructions, SubsecondTime elapsed_time)
+      {
+         m_spin_iterations += iterations;
          m_spin_instructions += instructions;
          m_spin_elapsed_time += elapsed_time;
       }
@@ -181,6 +194,8 @@ class Core
       IntPtr m_icache_last_block;
 
       UInt64 m_spin_loops;
+      UInt64 m_spin_instances;
+      UInt64 m_spin_iterations;
       UInt64 m_spin_instructions;
       SubsecondTime m_spin_elapsed_time;
 

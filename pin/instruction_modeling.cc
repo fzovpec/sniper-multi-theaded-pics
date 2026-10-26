@@ -1,7 +1,6 @@
 #include "instruction_modeling.h"
 #include "inst_mode_macros.h"
 #include "local_storage.h"
-#include "spin_loop_detection.h"
 #include "lite/memory_modeling.h"
 #include "lite/handle_syscalls.h"
 
@@ -283,10 +282,6 @@ VOID InstructionModeling::addInstructionModeling(TRACE trace, INS ins, InstMode:
       // Instrument Memory Operations
       lite::addMemoryModeling(trace, ins, inst_mode);
    }
-
-   // Spin loop detection
-   if (Sim()->getConfig()->getEnableSpinLoopDetection())
-      addSpinLoopDetection(trace, ins, inst_mode);
 }
 
 Instruction* InstructionModeling::decodeInstruction(INS ins)

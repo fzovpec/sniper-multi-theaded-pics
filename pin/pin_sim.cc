@@ -358,8 +358,6 @@ VOID threadStartCallback(THREADID threadIndex, CONTEXT *ctxt, INT32 flags, VOID 
    memset(&localStore[threadIndex], 0, sizeof(localStore[threadIndex]));
    localStore[threadIndex].thread = Sim()->getThreadManager()->getThreadFromID(thread_id);
    localStore[threadIndex].thread->m_os_info.tid = syscall(__NR_gettid);
-   if (Sim()->getConfig()->getEnableSpinLoopDetection())
-      localStore[threadIndex].sld.sld = new SpinLoopDetector(localStore[threadIndex].thread);
    for (unsigned int idx = 0; idx < ThreadLocalStorage::NUM_SCRATCHPADS; ++idx)
    {
       int status = posix_memalign((void**) &localStore[threadIndex].scratch[idx], 4 * sizeof (void*), ThreadLocalStorage::SCRATCHPAD_SIZE);

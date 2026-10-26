@@ -76,6 +76,8 @@ Core::Core(SInt32 id)
    , m_core_state(Core::IDLE)
    , m_icache_last_block(-1)
    , m_spin_loops(0)
+   , m_spin_instances(0)
+   , m_spin_iterations(0)
    , m_spin_instructions(0)
    , m_spin_elapsed_time(SubsecondTime::Zero())
    , m_instructions(0)
@@ -87,6 +89,8 @@ Core::Core(SInt32 id)
 
    registerStatsMetric("core", id, "instructions", &m_instructions);
    registerStatsMetric("core", id, "spin_loops", &m_spin_loops);
+   registerStatsMetric("core", id, "spin_instances", &m_spin_instances);
+   registerStatsMetric("core", id, "spin_iterations", &m_spin_iterations);
    registerStatsMetric("core", id, "spin_instructions", &m_spin_instructions);
    registerStatsMetric("core", id, "spin_elapsed_time", &m_spin_elapsed_time);
 

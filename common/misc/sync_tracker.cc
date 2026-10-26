@@ -267,8 +267,6 @@ void SyncTracker::onInstructionCommit(thread_id_t tid, Instruction *ins, Subseco
          else if (strstr(disas, "xchg") != NULL || strstr(disas, "XCHG") != NULL)
             is_xchg = true;
       }
-      printf("This is an atomic instruction [tid=%d] %d, %d (name: %s, disas: %s, addr: %p)\n",
-             tid, is_cmpxchg, is_xchg, name ? name : "NULL", disas ? disas : "NULL", (void*)mem_addr);
       fflush(stdout);
    }
 

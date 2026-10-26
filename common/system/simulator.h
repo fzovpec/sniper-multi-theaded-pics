@@ -28,6 +28,7 @@ class SamplingManager;
 class FaultinjectionManager;
 class TagsManager;
 class RoutineTracer;
+class SpinLoopDetector;
 class MemoryTracker;
 class MimicOS;
 namespace config { class Config; }
@@ -70,6 +71,7 @@ public:
    TraceManager *getTraceManager() { return m_trace_manager; }
    TagsManager *getTagsManager() { return m_tags_manager; }
    RoutineTracer *getRoutineTracer() { return m_rtn_tracer; }
+   SpinLoopDetector *getSpinLoopDetector() { return m_spin_loop_detector; }
    MemoryTracker *getMemoryTracker() { return m_memory_tracker; }
    void setMemoryTracker(MemoryTracker *memory_tracker) { m_memory_tracker = memory_tracker; }
    MimicOS *getMimicOS() { return m_mimicos; }
@@ -117,6 +119,7 @@ private:
    bool virtualized_system;
    bool m_running;
    bool m_inst_mode_output;
+   SpinLoopDetector *m_spin_loop_detector;
 
    static Simulator *m_singleton;
 

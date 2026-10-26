@@ -20,6 +20,7 @@
 #include "sampling_manager.h"
 #include "fault_injection.h"
 #include "routine_tracer.h"
+#include "spin_loop_detector.h"
 #include "instruction.h"
 #include "config.hpp"
 #include "magic_client.h"
@@ -153,6 +154,7 @@ void Simulator::start()
    m_sampling_manager = new SamplingManager();
    m_fastforward_performance_manager = FastForwardPerformanceManager::create();
    m_rtn_tracer = RoutineTracer::create();
+   m_spin_loop_detector = SpinLoopDetector::create();
    m_thread_manager = new ThreadManager();
 
    // Initialize MimicOS: simulated OS for page table management, physical
@@ -260,6 +262,12 @@ Simulator::~Simulator()
    if (m_rtn_tracer)
    {
       delete m_rtn_tracer;             m_rtn_tracer = NULL;
+   }
+   if (m_spin_loop_detector)
+   {
+      SpinLoopDetector *detector = m_spin_loop_detector;
+      m_spin_loop_detector = NULL;
+      delete detector;
    }
    // Don't remove the trace manager as threads could still be alive even if they are done
    //delete m_trace_manager;             m_trace_manager = NULL;
