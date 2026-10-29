@@ -21,6 +21,8 @@
 #include "mimicos.h"
 #include "stats.h"
 #include "parametric_dram_directory_msi/memory_manager.h"
+#include "unlock_detector.h"
+#include "spin_loop_detector.h"
 
 #include <unistd.h>
 #include <sys/syscall.h>
@@ -92,6 +94,8 @@ TraceThread::TraceThread(Thread *thread, SubsecondTime time_start, String tracef
    , m_stopped(false)
    , m_champsim_icache_hits(0)
    , m_champsim_icache_misses(0)
+   , m_is_spinning(false)
+   , m_other_thread_holds_lock(false)
 {
 
    bool userspace_mimicos_enabled = Sim()->getCfg()->getBool("general/enable_userspace_mimicos");
@@ -1439,6 +1443,7 @@ void TraceThread::m_run_func_with_userpace_mimicos()
                   break;
 
                case InstMode::DETAILED:
+                  checkAndReplaySpinLoop(inst, next_inst, core, prfmdl);
                   handleInstructionDetailed(inst, next_inst, prfmdl);
                   break;
 
@@ -1552,7 +1557,50 @@ void TraceThread::m_run_func_with_userpace_mimicos()
    Sim()->getTraceManager()->signalDone(this, time_end, m_stop /*aborted*/);
 }
 
+void TraceThread::checkAndReplaySpinLoop(Sift::Instruction &inst, Sift::Instruction &next_inst, Core* &core, PerformanceModel* &prfmdl)
+{
+   if (!inst.sinst || !next_inst.sinst)
+      return;
 
+   // Communicate with SpinLoopDetector to check:
+   // 1. Whether the current thread is spinning
+   // 2. Whether any other thread is currently holding a lock
+   m_is_spinning = false;
+   m_other_thread_holds_lock = false;
+
+   if (Sim()->getSpinLoopDetector())
+   {
+      m_is_spinning = Sim()->getSpinLoopDetector()->isSpinning(m_thread->getId());
+      m_other_thread_holds_lock = Sim()->getSpinLoopDetector()->anyOtherThreadHoldsLock(m_thread->getId());
+   }
+
+   std::vector<IntPtr> loop_pcs;
+   if (Sim()->getSpinLoopDetector() &&
+       Sim()->getSpinLoopDetector()->getRecordedLoopPCs(m_thread->getId(), loop_pcs) &&
+       !loop_pcs.empty())
+   {
+      bool current_in_loop = false;
+      bool next_in_loop = false;
+      for (size_t i = 0; i < loop_pcs.size(); ++i)
+      {
+         if (loop_pcs[i] == inst.sinst->addr) current_in_loop = true;
+         if (loop_pcs[i] == next_inst.sinst->addr) next_in_loop = true;
+      }
+
+      // Backward jump is repeating the loop
+      if (next_inst.sinst->addr < inst.sinst->addr)
+      {
+         next_in_loop = true;
+      }
+
+      if (inst.is_branch && current_in_loop && !next_in_loop && m_other_thread_holds_lock)
+      {
+         printf("[TraceThread] Thread %d (Core %d) is spinning at PC 0x%lx, next PC 0x%lx is outside loop while other thread holds lock!\n",
+                m_thread->getId(), core->getId(), (unsigned long)inst.sinst->addr, (unsigned long)next_inst.sinst->addr);
+         fflush(stdout);
+      }
+   }
+}
 
 void TraceThread::m_run_func_default()
 {
@@ -1665,6 +1713,7 @@ void TraceThread::m_run_func_default()
                break;
 
             case InstMode::DETAILED:
+               checkAndReplaySpinLoop(inst, next_inst, core, prfmdl);
                handleInstructionDetailed(inst, next_inst, prfmdl);
                break;
 

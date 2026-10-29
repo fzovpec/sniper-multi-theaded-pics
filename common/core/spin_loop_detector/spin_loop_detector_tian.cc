@@ -5,6 +5,9 @@
 #include "instruction.h"
 #include "core.h"
 #include "performance_model.h"
+#include "simulator.h"
+#include "stats.h"
+#include "unlock_detector.h"
 #include <inttypes.h>
 #include <cstdio>
 
@@ -51,10 +54,36 @@ void SpinLoopDetectorTian::resolveEpisode(Core *core, thread_id_t tid, const Loa
       core->updateSpinCount(entry.counter, entry.accum_ins, entry.accum_time);
       m_syn_table[entry.pc] = sme.writepc;
 
-      printf("[Tian Spin Detector] Confirmed Synchronization Pair: Read PC 0x%lx (Core %d) <--> Write PC 0x%lx (Thread %d) | Iterations: %u | Spin time: %" PRIu64 " ns\n",
+      SubsecondTime spin_start = (entry.last_tcount > entry.accum_time) ? (entry.last_tcount - entry.accum_time) : SubsecondTime::Zero();
+
+      printf("[Tian Spin Detector] Confirmed Synchronization Pair: Read PC 0x%lx (Core %d) <--> Write PC 0x%lx (Thread %d) | Iterations: %u | Spin: T=%" PRIu64 " -> T=%" PRIu64 " ns (duration %" PRIu64 " ns)\n",
              (unsigned long)entry.pc, core->getId(), (unsigned long)sme.writepc, sme.writetid,
-             entry.counter, entry.accum_time.getNS());
+             entry.counter, spin_start.getNS(), entry.last_tcount.getNS(), entry.accum_time.getNS());
       fflush(stdout);
+
+      // Record synchronization events in SQLite stats for timeline plotting
+      if (Sim()->getStatsManager())
+      {
+         Sim()->getStatsManager()->recordSyncEvent(tid, "begin_lock_acquisition", spin_start.getNS(), entry.addr);
+         Sim()->getStatsManager()->recordSyncEvent(tid, "end_lock_acquisition", entry.last_tcount.getNS(), entry.addr);
+      }
+
+      if (UnlockDetector::getSingleton())
+      {
+         UnlockDetector::getSingleton()->recordAcquire(tid, entry.addr, entry.pc, entry.last_tcount, entry.last_icount, true);
+      }
+
+      if (m_prev_iteration.count(tid) > 0 && !m_prev_iteration[tid].empty())
+      {
+         printf("[Tian Loop Body] Thread %d (Core %d) recorded iteration before last (%zu insns):\n",
+                tid, core->getId(), m_prev_iteration[tid].size());
+         for (size_t i = 0; i < m_prev_iteration[tid].size(); ++i)
+         {
+            printf("    [%zu] 0x%lx: %s\n", i, (unsigned long)m_prev_iteration[tid][i].pc,
+                   m_prev_iteration[tid][i].disas.c_str());
+         }
+         fflush(stdout);
+      }
    }
 }
 
@@ -62,6 +91,31 @@ void SpinLoopDetectorTian::onMicroOpCommit(Core *core, thread_id_t tid, const Dy
 {
    if (!uop || !uop->getMicroOp())
       return;
+
+   const Instruction *ins = uop->getMicroOp()->getInstruction();
+   IntPtr vaddr = ins ? const_cast<Instruction*>(ins)->getVaddress() : 0;
+   IntPtr pc = ins ? (vaddr != 0 ? vaddr : ins->getAddress()) : uop->getMicroOp()->getInstructionPointer().phys;
+   bool is_atomic = ins ? ins->isAtomic() : false;
+
+   ScopedLock sl(m_lock);
+
+   // Record dynamic loop body instruction if this thread is actively spinning
+   if (uop->isFirst() && m_active_spins.count(tid) > 0 && m_active_spins[tid].active)
+   {
+      IntPtr spin_load_pc = m_active_spins[tid].load_pc;
+      if (pc == spin_load_pc)
+      {
+         // We reached the anchor load: the previous iteration is complete!
+         if (!m_current_iteration[tid].empty())
+         {
+            m_prev_iteration[tid] = m_current_iteration[tid];
+            m_current_iteration[tid].clear();
+         }
+      }
+
+      String disas = ins ? ins->getDisassembly() : "";
+      m_current_iteration[tid].push_back(RecordedInstruction(pc, disas));
+   }
 
    bool is_load = uop->getMicroOp()->isLoad();
    bool is_store = uop->getMicroOp()->isStore();
@@ -72,12 +126,6 @@ void SpinLoopDetectorTian::onMicroOpCommit(Core *core, thread_id_t tid, const Dy
    IntPtr mem_addr = uop->getAddress().address;
    if (mem_addr == 0)
       return;
-
-   const Instruction *ins = uop->getMicroOp()->getInstruction();
-   IntPtr pc = ins ? ins->getAddress() : uop->getMicroOp()->getInstructionPointer().phys;
-   bool is_atomic = ins ? ins->isAtomic() : false;
-
-   ScopedLock sl(m_lock);
 
    // 1. Process LOAD (ignore the load micro-op of atomic RMW instructions like lock cmpxchg)
    if (is_load && !is_atomic)
@@ -111,7 +159,14 @@ void SpinLoopDetectorTian::onMicroOpCommit(Core *core, thread_id_t tid, const Dy
             loc->last_tcount = time;
 
             if (loc->counter >= m_threshold)
+            {
                loc->possible_spin = true;
+               m_active_spins[tid] = ActiveSpinInfo(loc->pc, loc->addr);
+               if (UnlockDetector::getSingleton())
+               {
+                  UnlockDetector::getSingleton()->addKnownLock(loc->addr);
+               }
+            }
          }
          else
          {
@@ -195,4 +250,112 @@ void SpinLoopDetectorTian::onMicroOpCommit(Core *core, thread_id_t tid, const Dy
          writers[tid] = ShadowMemoryEntry(pc, tid, m_write_seq, is_atomic);
       }
    }
+}
+
+bool SpinLoopDetectorTian::getActiveSpin(thread_id_t tid, IntPtr *out_load_pc, IntPtr *out_lock_addr)
+{
+   ScopedLock sl(m_lock);
+   if (m_active_spins.count(tid) > 0 && m_active_spins[tid].active)
+   {
+      if (out_load_pc) *out_load_pc = m_active_spins[tid].load_pc;
+      if (out_lock_addr) *out_lock_addr = m_active_spins[tid].lock_addr;
+      return true;
+   }
+   if (m_load_tables.count(tid) == 0)
+      return false;
+   const std::deque<LoadTableEntry> &table = m_load_tables[tid];
+   for (std::deque<LoadTableEntry>::const_iterator it = table.begin(); it != table.end(); ++it)
+   {
+      if (it->possible_spin)
+      {
+         if (out_load_pc) *out_load_pc = it->pc;
+         if (out_lock_addr) *out_lock_addr = it->addr;
+         return true;
+      }
+   }
+   return false;
+}
+
+void SpinLoopDetectorTian::clearActiveSpin(thread_id_t tid)
+{
+   ScopedLock sl(m_lock);
+   if (m_active_spins.count(tid) > 0)
+   {
+      m_active_spins[tid].active = false;
+   }
+}
+
+bool SpinLoopDetectorTian::isSpinning(thread_id_t tid)
+{
+   ScopedLock sl(m_lock);
+   if (m_active_spins.count(tid) > 0 && m_active_spins[tid].active)
+      return true;
+   if (m_load_tables.count(tid) > 0)
+   {
+      for (std::deque<LoadTableEntry>::const_iterator it = m_load_tables[tid].begin(); it != m_load_tables[tid].end(); ++it)
+      {
+         if (it->possible_spin)
+            return true;
+      }
+   }
+   return false;
+}
+
+bool SpinLoopDetectorTian::anyOtherThreadHoldsLock(thread_id_t tid)
+{
+   if (UnlockDetector::getSingleton())
+      return UnlockDetector::getSingleton()->anyOtherThreadHoldsLock(tid);
+   return false;
+}
+
+bool SpinLoopDetectorTian::getRecordedIteration(thread_id_t tid, std::vector<RecordedInstruction> &out_iter)
+{
+   ScopedLock sl(m_lock);
+   if (m_prev_iteration.count(tid) > 0 && !m_prev_iteration[tid].empty())
+   {
+      out_iter = m_prev_iteration[tid];
+      return true;
+   }
+   return false;
+}
+
+bool SpinLoopDetectorTian::getRecordedLoopPCs(thread_id_t tid, std::vector<IntPtr> &out_pcs)
+{
+   ScopedLock sl(m_lock);
+   if (m_prev_iteration.count(tid) > 0 && !m_prev_iteration[tid].empty())
+   {
+      out_pcs.clear();
+      for (size_t i = 0; i < m_prev_iteration[tid].size(); ++i)
+         out_pcs.push_back(m_prev_iteration[tid][i].pc);
+      return true;
+   }
+   return false;
+}
+
+bool SpinLoopDetectorTian::getWaitingThread(IntPtr lock_addr, thread_id_t exclude_tid, thread_id_t &out_waiter_tid)
+{
+   ScopedLock sl(m_lock);
+   for (std::unordered_map<thread_id_t, ActiveSpinInfo>::const_iterator it = m_active_spins.begin(); it != m_active_spins.end(); ++it)
+   {
+      if (it->first != exclude_tid && it->second.active && it->second.lock_addr == lock_addr)
+      {
+         out_waiter_tid = it->first;
+         return true;
+      }
+   }
+   for (std::unordered_map<thread_id_t, std::deque<LoadTableEntry>>::const_iterator it = m_load_tables.begin(); it != m_load_tables.end(); ++it)
+   {
+      if (it->first != exclude_tid)
+      {
+         for (std::deque<LoadTableEntry>::const_iterator lit = it->second.begin(); lit != it->second.end(); ++lit)
+         {
+            if (lit->possible_spin && lit->addr == lock_addr)
+            {
+               out_waiter_tid = it->first;
+               return true;
+            }
+         }
+      }
+   }
+   return false;
 }

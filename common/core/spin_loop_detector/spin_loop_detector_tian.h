@@ -4,6 +4,7 @@
 #include "spin_loop_detector.h"
 #include "lock.h"
 #include <deque>
+#include <vector>
 #include <unordered_map>
 
 class DynamicMicroOp;
@@ -45,12 +46,36 @@ class SpinLoopDetectorTian : public SpinLoopDetector
               last_icount(0), last_tcount(SubsecondTime::Zero()) {}
       };
 
+      struct ActiveSpinInfo
+      {
+         IntPtr load_pc;
+         IntPtr lock_addr;
+         bool active;
+         ActiveSpinInfo() : load_pc(0), lock_addr(0), active(false) {}
+         ActiveSpinInfo(IntPtr pc, IntPtr addr) : load_pc(pc), lock_addr(addr), active(true) {}
+      };
+
+   public:
+      struct RecordedInstruction
+      {
+         IntPtr pc;
+         String disas;
+         RecordedInstruction() : pc(0), disas("") {}
+         RecordedInstruction(IntPtr _pc, String _disas) : pc(_pc), disas(_disas) {}
+      };
+
+   private:
       Lock m_lock;
       UInt32 m_threshold;
       UInt64 m_write_seq;
 
       // Per-thread load table
       std::unordered_map<thread_id_t, std::deque<LoadTableEntry>> m_load_tables;
+      // Per-thread confirmed active spins
+      std::unordered_map<thread_id_t, ActiveSpinInfo> m_active_spins;
+      // Recorded loop body iterations: current in-progress vs previous completed
+      std::unordered_map<thread_id_t, std::vector<RecordedInstruction>> m_current_iteration;
+      std::unordered_map<thread_id_t, std::vector<RecordedInstruction>> m_prev_iteration;
       // Global shadow memory: addr -> (tid -> last store by tid)
       std::unordered_map<IntPtr, std::unordered_map<thread_id_t, ShadowMemoryEntry>> m_shadow_mem;
       std::unordered_map<IntPtr, IntPtr> m_syn_table;
@@ -63,6 +88,13 @@ class SpinLoopDetectorTian : public SpinLoopDetector
       virtual ~SpinLoopDetectorTian() {}
 
       virtual void onMicroOpCommit(Core *core, thread_id_t tid, const DynamicMicroOp *uop, SubsecondTime time);
+      virtual bool getActiveSpin(thread_id_t tid, IntPtr *out_load_pc, IntPtr *out_lock_addr) override;
+      virtual bool isSpinning(thread_id_t tid) override;
+      virtual bool anyOtherThreadHoldsLock(thread_id_t tid) override;
+      virtual void clearActiveSpin(thread_id_t tid) override;
+      virtual bool getRecordedLoopPCs(thread_id_t tid, std::vector<IntPtr> &out_pcs) override;
+      virtual bool getWaitingThread(IntPtr lock_addr, thread_id_t exclude_tid, thread_id_t &out_waiter_tid) override;
+      bool getRecordedIteration(thread_id_t tid, std::vector<RecordedInstruction> &out_iter);
 };
 
 #endif // __SPIN_LOOP_DETECTOR_TIAN_H

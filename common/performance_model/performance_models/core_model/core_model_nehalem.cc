@@ -20,6 +20,9 @@ CoreModelNehalem::CoreModelNehalem()
       instructionLatencies[i] = 1;
    }
 
+   // Modern x86 PAUSE latency (~140 cycles on Skylake/Cascade Lake/Meteor Lake)
+   instructionLatencies[XED_ICLASS_PAUSE] = 140;
+
    instructionLatencies[XED_ICLASS_MUL] = 3;
    instructionLatencies[XED_ICLASS_IMUL] = 3;
 

@@ -133,6 +133,13 @@ class TraceThread : public Runnable
       {
          SubsecondTime kernel_time;
       } stats;
+
+      // Spin-loop detection state
+      bool m_is_spinning;
+      bool m_other_thread_holds_lock;
+
+      void checkAndReplaySpinLoop(Sift::Instruction &inst, Sift::Instruction &next_inst, Core* &core, PerformanceModel* &prfmdl);
+
       // Make run() a function pointer which is initialized in the constructor
       typedef void (TraceThread::*RunFunc)();
       RunFunc m_current_run_func;

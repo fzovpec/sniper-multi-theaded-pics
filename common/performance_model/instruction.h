@@ -117,7 +117,7 @@ public:
    }
 
    void setVaddress(IntPtr vaddr) { m_vaddr = vaddr; }
-   IntPtr getVaddress() { return m_vaddr; }
+   IntPtr getVaddress() const { return m_vaddr; }
 
    // Dynamic ownership: if true, this Instruction and its MicroOps should be deleted
    // when the last DynamicMicroOp is freed from the ROB.

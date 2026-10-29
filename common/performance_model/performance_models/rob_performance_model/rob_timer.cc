@@ -15,6 +15,7 @@
 #include "instruction.h"
 #include "sync_tracker.h"
 #include "spin_loop_detector.h"
+#include "unlock_detector.h"
 #include "thread.h"
 
 #include <iostream>
@@ -953,6 +954,9 @@ SubsecondTime RobTimer::doCommit(uint64_t &instructionsExecuted)
 
       if (Sim()->getSpinLoopDetector())
          Sim()->getSpinLoopDetector()->onMicroOpCommit(m_core, tid, entry->uop, now);
+
+      if (UnlockDetector::getSingleton())
+         UnlockDetector::getSingleton()->onMicroOpCommit(m_core, tid, entry->uop, now);
 
       if (curr_pics)
       {
