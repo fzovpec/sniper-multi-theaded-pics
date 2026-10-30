@@ -1319,7 +1319,7 @@ void TraceThread::m_run_func_with_userpace_mimicos()
                      std::cout << "[TRACE:" << m_thread->getId() << "] -- First instruction from App SIFT reader: inst = "
                                << std::hex << inst_app.sinst->addr << std::dec << std::endl;
 #endif
-                     if (!m_current_sift_reader->Read(next_inst_app))
+                     if (!readNextAppInstruction(next_inst_app))
                         break;
                      app_initialized = true;
                   }
@@ -1327,7 +1327,7 @@ void TraceThread::m_run_func_with_userpace_mimicos()
                   {
                      // Continue: shift lookahead then read a new next_inst_app
                      inst_app = next_inst_app;
-                     if (!m_current_sift_reader->Read(next_inst_app))
+                     if (!readNextAppInstruction(next_inst_app))
                         break;
 #if DEBUG_TRACE_THREAD >= DEBUG_DETAILED
                      std::cout << "[TRACE:" << m_thread->getId() << "] -- Restored instruction from App SIFT reader: inst = "
@@ -1353,7 +1353,7 @@ void TraceThread::m_run_func_with_userpace_mimicos()
 
             // We assume app_initialized is true when we get here
             inst_app = next_inst_app;
-            if (!m_current_sift_reader->Read(next_inst_app))
+            if (!readNextAppInstruction(next_inst_app))
                break;   // EOF on app trace
 
             next_inst = next_inst_app;
@@ -1557,6 +1557,18 @@ void TraceThread::m_run_func_with_userpace_mimicos()
    Sim()->getTraceManager()->signalDone(this, time_end, m_stop /*aborted*/);
 }
 
+bool TraceThread::readNextAppInstruction(Sift::Instruction &inst_out)
+{
+   if (!m_injected_trace.empty())
+   {
+      inst_out = m_injected_trace.front();
+      m_injected_trace.pop_front();
+      return true;
+   }
+   Sift::Reader *reader = m_current_sift_reader ? m_current_sift_reader : &m_trace;
+   return reader->Read(inst_out);
+}
+
 void TraceThread::checkAndReplaySpinLoop(Sift::Instruction &inst, Sift::Instruction &next_inst, Core* &core, PerformanceModel* &prfmdl)
 {
    if (!inst.sinst || !next_inst.sinst)
@@ -1579,12 +1591,19 @@ void TraceThread::checkAndReplaySpinLoop(Sift::Instruction &inst, Sift::Instruct
        Sim()->getSpinLoopDetector()->getRecordedLoopPCs(m_thread->getId(), loop_pcs) &&
        !loop_pcs.empty())
    {
-      bool current_in_loop = false;
+      int branch_idx = -1;
       bool next_in_loop = false;
       for (size_t i = 0; i < loop_pcs.size(); ++i)
       {
-         if (loop_pcs[i] == inst.sinst->addr) current_in_loop = true;
+         if (loop_pcs[i] == inst.sinst->addr) branch_idx = (int)i;
          if (loop_pcs[i] == next_inst.sinst->addr) next_in_loop = true;
+      }
+      bool current_in_loop = (branch_idx != -1);
+
+      // Cache instruction only when confirmed to be in the loop
+      if (current_in_loop)
+      {
+         m_sift_loop_insts[inst.sinst->addr] = inst;
       }
 
       // Backward jump is repeating the loop
@@ -1593,11 +1612,32 @@ void TraceThread::checkAndReplaySpinLoop(Sift::Instruction &inst, Sift::Instruct
          next_in_loop = true;
       }
 
-      if (inst.is_branch && current_in_loop && !next_in_loop && m_other_thread_holds_lock)
+      if (inst.is_branch && current_in_loop && !next_in_loop)
       {
-         printf("[TraceThread] Thread %d (Core %d) is spinning at PC 0x%lx, next PC 0x%lx is outside loop while other thread holds lock!\n",
-                m_thread->getId(), core->getId(), (unsigned long)inst.sinst->addr, (unsigned long)next_inst.sinst->addr);
-         fflush(stdout);
+
+         if (m_other_thread_holds_lock)
+         {
+            Sift::Instruction deferred_next = next_inst;
+
+            // Turn this branch into taken back into the loop
+            inst.taken = true;
+
+            // Tian's iteration starts at the anchor load, not at the loop head,
+            // so start right after the exit branch and end ON the exit branch.
+            size_t N = loop_pcs.size();
+            next_inst = m_sift_loop_insts[loop_pcs[(branch_idx + 1) % N]];
+
+            for (size_t k = 2; k <= N; ++k)
+            {
+               Sift::Instruction syn_inst = m_sift_loop_insts[loop_pcs[(branch_idx + k) % N]];
+               if (k == N)
+                  syn_inst.taken = false;   // the exit branch again -> falls through to deferred_next -> re-checked
+               m_injected_trace.push_back(syn_inst);
+            }
+
+            // Put back the original exit instruction at the end of the injected iteration
+            m_injected_trace.push_back(deferred_next);
+         }
       }
    }
 }
@@ -1637,7 +1677,7 @@ void TraceThread::m_run_func_default()
 
    bool have_first = m_trace.Read(inst);
 
-   while(have_first && m_trace.Read(next_inst))
+   while(have_first && readNextAppInstruction(next_inst))
    {
    
       if (!m_started)

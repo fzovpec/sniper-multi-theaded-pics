@@ -12,6 +12,7 @@
 #include <decoder.h>
 
 #include <unordered_map>
+#include <deque>
 
 #define NUM_PAPI_COUNTERS 6
 
@@ -137,7 +138,10 @@ class TraceThread : public Runnable
       // Spin-loop detection state
       bool m_is_spinning;
       bool m_other_thread_holds_lock;
+      std::deque<Sift::Instruction> m_injected_trace;
+      std::unordered_map<IntPtr, Sift::Instruction> m_sift_loop_insts;
 
+      bool readNextAppInstruction(Sift::Instruction &inst_out);
       void checkAndReplaySpinLoop(Sift::Instruction &inst, Sift::Instruction &next_inst, Core* &core, PerformanceModel* &prfmdl);
 
       // Make run() a function pointer which is initialized in the constructor
