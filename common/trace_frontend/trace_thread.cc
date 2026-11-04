@@ -1583,7 +1583,7 @@ void TraceThread::checkAndReplaySpinLoop(Sift::Instruction &inst, Sift::Instruct
    if (Sim()->getSpinLoopDetector())
    {
       m_is_spinning = Sim()->getSpinLoopDetector()->isSpinning(m_thread->getId());
-      m_other_thread_holds_lock = Sim()->getSpinLoopDetector()->anyOtherThreadHoldsLock(m_thread->getId());
+      m_other_thread_holds_lock = Sim()->getSpinLoopDetector()->isWaitingForSyncWrite(m_thread->getId());
    }
 
    std::vector<IntPtr> loop_pcs;

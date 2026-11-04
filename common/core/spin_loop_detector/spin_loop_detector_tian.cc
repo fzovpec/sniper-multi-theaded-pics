@@ -75,13 +75,28 @@ void SpinLoopDetectorTian::resolveEpisode(Core *core, thread_id_t tid, const Loa
 
       if (m_prev_iteration.count(tid) > 0 && !m_prev_iteration[tid].empty())
       {
-         printf("[Tian Loop Body] Thread %d (Core %d) recorded iteration before last (%zu insns):\n",
-                tid, core->getId(), m_prev_iteration[tid].size());
-         for (size_t i = 0; i < m_prev_iteration[tid].size(); ++i)
-         {
-            printf("    [%zu] 0x%lx: %s\n", i, (unsigned long)m_prev_iteration[tid][i].pc,
-                   m_prev_iteration[tid][i].disas.c_str());
-         }
+         const std::vector<RecordedInstruction> &body = m_prev_iteration[tid];
+         const size_t SHOW = 4;
+
+         // When was the sync variable written relative to this spin?
+         bool still_active = m_active_spins.count(tid) > 0 && m_active_spins[tid].active && m_active_spins[tid].load_pc == entry.pc;
+         const char *status;
+         if (sme.writeseq <= entry.start_writeseq)
+            status = "ALREADY updated before spin started";
+         else if (still_active)
+            status = "updated during spin BEFORE activation (never deactivated)";
+         else
+            status = "updated during spin AFTER activation (deactivated OK)";
+
+         printf("[Tian Loop Body] T%d: %zu insns [", tid, body.size());
+         for (size_t i = 0; i < body.size() && i < SHOW; ++i)
+            printf(" %lx", (unsigned long)(body[i].pc & 0xffff));
+         if (body.size() > 2 * SHOW)
+            printf(" ...");
+         for (size_t i = (body.size() > 2 * SHOW ? body.size() - SHOW : SHOW); i < body.size(); ++i)
+            printf(" %lx", (unsigned long)(body[i].pc & 0xffff));
+         printf(" ] | var %lx by T%d seq %" PRIu64 " vs start %" PRIu64 ": %s\n",
+                (unsigned long)(entry.addr & 0xffff), sme.writetid, sme.writeseq, entry.start_writeseq, status);
          fflush(stdout);
       }
    }
@@ -161,6 +176,10 @@ void SpinLoopDetectorTian::onMicroOpCommit(Core *core, thread_id_t tid, const Dy
             if (loc->counter >= m_threshold)
             {
                loc->possible_spin = true;
+            }
+            // Activate only once per episode, so a spin deactivated by a remote write is not re-activated
+            if (loc->counter == m_threshold)
+            {
                m_active_spins[tid] = ActiveSpinInfo(loc->pc, loc->addr);
                if (UnlockDetector::getSingleton())
                {
@@ -249,6 +268,16 @@ void SpinLoopDetectorTian::onMicroOpCommit(Core *core, thread_id_t tid, const Dy
       {
          writers[tid] = ShadowMemoryEntry(pc, tid, m_write_seq, is_atomic);
       }
+
+      // Another thread wrote to the address a thread is spinning on: that spin is over
+      for (std::unordered_map<thread_id_t, ActiveSpinInfo>::iterator it = m_active_spins.begin(); it != m_active_spins.end(); ++it)
+      {
+         if (it->first != tid && it->second.active && it->second.lock_addr == mem_addr)
+         {
+            it->second.active = false;
+            m_current_iteration[it->first].clear();
+         }
+      }
    }
 }
 
@@ -306,6 +335,47 @@ bool SpinLoopDetectorTian::anyOtherThreadHoldsLock(thread_id_t tid)
    if (UnlockDetector::getSingleton())
       return UnlockDetector::getSingleton()->anyOtherThreadHoldsLock(tid);
    return false;
+}
+
+bool SpinLoopDetectorTian::isWaitingForSyncWrite(thread_id_t tid)
+{
+   ScopedLock sl(m_lock);
+   if (m_active_spins.count(tid) == 0 || !m_active_spins[tid].active || m_load_tables.count(tid) == 0)
+      return false;
+
+   IntPtr spin_pc = m_active_spins[tid].load_pc;
+   IntPtr sync_addr = 0;
+   UInt64 start_seq = 0;
+   bool found = false;
+
+   const std::deque<LoadTableEntry> &table = m_load_tables[tid];
+   for (std::deque<LoadTableEntry>::const_iterator it = table.begin(); it != table.end(); ++it)
+   {
+      if (it->pc == spin_pc)
+      {
+         if (!it->possible_spin)
+            return false;
+         sync_addr = it->addr;
+         start_seq = it->start_writeseq;
+         found = true;
+         break;
+      }
+   }
+
+   if (!found)
+      return false;
+
+   std::unordered_map<IntPtr, std::unordered_map<thread_id_t, ShadowMemoryEntry>>::const_iterator addr_it = m_shadow_mem.find(sync_addr);
+   if (addr_it == m_shadow_mem.end())
+      return true;
+
+   const std::unordered_map<thread_id_t, ShadowMemoryEntry> &writers = addr_it->second;
+   for (std::unordered_map<thread_id_t, ShadowMemoryEntry>::const_iterator it = writers.begin(); it != writers.end(); ++it)
+   {
+      if (it->first != tid && it->second.writeseq > start_seq)
+         return false;
+   }
+   return true;
 }
 
 bool SpinLoopDetectorTian::getRecordedIteration(thread_id_t tid, std::vector<RecordedInstruction> &out_iter)

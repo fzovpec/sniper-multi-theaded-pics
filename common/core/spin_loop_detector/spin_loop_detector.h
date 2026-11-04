@@ -23,6 +23,7 @@ class SpinLoopDetector
       virtual bool getActiveSpin(thread_id_t tid, IntPtr *out_load_pc, IntPtr *out_lock_addr) { return false; }
       virtual bool isSpinning(thread_id_t tid) { return false; }
       virtual bool anyOtherThreadHoldsLock(thread_id_t tid) { return false; }
+      virtual bool isWaitingForSyncWrite(thread_id_t tid) { return false; }
       virtual void clearActiveSpin(thread_id_t tid) {}
       virtual bool getRecordedLoopPCs(thread_id_t tid, std::vector<IntPtr> &out_pcs) { return false; }
       virtual bool getWaitingThread(IntPtr lock_addr, thread_id_t exclude_tid, thread_id_t &out_waiter_tid) { return false; }
