@@ -21,6 +21,7 @@
 #include "fault_injection.h"
 #include "routine_tracer.h"
 #include "spin_loop_detector.h"
+#include "lock_state_tracker.h"
 #include "instruction.h"
 #include "config.hpp"
 #include "magic_client.h"
@@ -155,6 +156,7 @@ void Simulator::start()
    m_fastforward_performance_manager = FastForwardPerformanceManager::create();
    m_rtn_tracer = RoutineTracer::create();
    m_spin_loop_detector = SpinLoopDetector::create();
+   m_lock_state_tracker = LockStateTracker::create();
    m_thread_manager = new ThreadManager();
 
    // Initialize MimicOS: simulated OS for page table management, physical
@@ -268,6 +270,12 @@ Simulator::~Simulator()
       SpinLoopDetector *detector = m_spin_loop_detector;
       m_spin_loop_detector = NULL;
       delete detector;
+   }
+   if (m_lock_state_tracker)
+   {
+      LockStateTracker *tracker = m_lock_state_tracker;
+      m_lock_state_tracker = NULL;
+      delete tracker;
    }
    // Don't remove the trace manager as threads could still be alive even if they are done
    //delete m_trace_manager;             m_trace_manager = NULL;

@@ -21,7 +21,7 @@
 #include "mimicos.h"
 #include "stats.h"
 #include "parametric_dram_directory_msi/memory_manager.h"
-#include "unlock_detector.h"
+#include "lock_state_tracker.h"
 #include "spin_loop_detector.h"
 
 #include <unistd.h>
@@ -96,6 +96,8 @@ TraceThread::TraceThread(Thread *thread, SubsecondTime time_start, String tracef
    , m_champsim_icache_misses(0)
    , m_is_spinning(false)
    , m_other_thread_holds_lock(false)
+   , m_claim_load_pc(0)
+   , m_claim_addr(0)
 {
 
    bool userspace_mimicos_enabled = Sim()->getCfg()->getBool("general/enable_userspace_mimicos");
@@ -1443,8 +1445,8 @@ void TraceThread::m_run_func_with_userpace_mimicos()
                   break;
 
                case InstMode::DETAILED:
-                  checkAndReplaySpinLoop(inst, next_inst, core, prfmdl);
-                  handleInstructionDetailed(inst, next_inst, prfmdl);
+                  if (!checkAndReplaySpinLoop(inst, next_inst, core, prfmdl))
+                     handleInstructionDetailed(inst, next_inst, prfmdl);
                   break;
 
                default:
@@ -1569,25 +1571,52 @@ bool TraceThread::readNextAppInstruction(Sift::Instruction &inst_out)
    return reader->Read(inst_out);
 }
 
-void TraceThread::checkAndReplaySpinLoop(Sift::Instruction &inst, Sift::Instruction &next_inst, Core* &core, PerformanceModel* &prfmdl)
+bool TraceThread::checkAndReplaySpinLoop(Sift::Instruction &inst, Sift::Instruction &next_inst, Core* &core, PerformanceModel* &prfmdl)
 {
    if (!inst.sinst || !next_inst.sinst)
-      return;
+      return false;
 
-   // Communicate with SpinLoopDetector to check:
-   // 1. Whether the current thread is spinning
-   // 2. Whether any other thread is currently holding a lock
+   m_sift_loop_insts[inst.sinst->addr] = inst;
+   m_sift_loop_order.push_back(inst.sinst->addr);
+   if (m_sift_loop_order.size() > 64)
+   {
+      IntPtr old_pc = m_sift_loop_order.front();
+      m_sift_loop_order.pop_front();
+      bool still_recent = false;
+      for (size_t i = 0; i < m_sift_loop_order.size(); ++i)
+      {
+         if (m_sift_loop_order[i] == old_pc)
+         {
+            still_recent = true;
+            break;
+         }
+      }
+      if (!still_recent)
+         m_sift_loop_insts.erase(old_pc);
+   }
+
+   // Ask the LockStateTracker whether the current thread is spinning on a lock;
+   // whether another thread still holds that lock is checked when the trace leaves the spin loop
    m_is_spinning = false;
    m_other_thread_holds_lock = false;
 
-   if (Sim()->getSpinLoopDetector())
+   if (Sim()->getLockStateTracker())
    {
-      m_is_spinning = Sim()->getSpinLoopDetector()->isSpinning(m_thread->getId());
-      m_other_thread_holds_lock = Sim()->getSpinLoopDetector()->isWaitingForSyncWrite(m_thread->getId());
+      m_is_spinning = Sim()->getLockStateTracker()->isSpinning(m_thread->getId());
    }
 
+   // Remember the last spin-loop load of a lock variable until the branch that follows it
+   if (Sim()->getLockStateTracker() && inst.num_addresses > 0 && Sim()->getLockStateTracker()->isSpinLoad(inst.sinst->addr))
+   {
+      m_claim_load_pc = inst.sinst->addr;
+      m_claim_addr = va2pa(inst.addresses[0]);
+   }
+
+   bool exit_checked = false;
+
    std::vector<IntPtr> loop_pcs;
-   if (Sim()->getSpinLoopDetector() &&
+   if (m_is_spinning &&
+       Sim()->getSpinLoopDetector() &&
        Sim()->getSpinLoopDetector()->getRecordedLoopPCs(m_thread->getId(), loop_pcs) &&
        !loop_pcs.empty())
    {
@@ -1600,23 +1629,39 @@ void TraceThread::checkAndReplaySpinLoop(Sift::Instruction &inst, Sift::Instruct
       }
       bool current_in_loop = (branch_idx != -1);
 
-      // Cache instruction only when confirmed to be in the loop
-      if (current_in_loop)
-      {
-         m_sift_loop_insts[inst.sinst->addr] = inst;
-      }
-
       // Backward jump is repeating the loop
       if (next_inst.sinst->addr < inst.sinst->addr)
       {
          next_in_loop = true;
       }
 
-      if (inst.is_branch && current_in_loop && !next_in_loop)
+      // Early exit: the lock was released but the trace keeps spinning, so skip the rest of the recorded spin.
+      // The thread still takes the lock at its own recorded exit, so the handoff order follows the trace.
+      if (current_in_loop && next_in_loop && Sim()->getLockStateTracker()->isLockFree(m_thread->getId()))
+         return true;
+
+      // The recorded loop body can be from an older spin: it is only replayed if this thread still has all its instructions
+      bool have_body = true;
+      for (size_t i = 0; i < loop_pcs.size(); ++i)
       {
+         if (m_sift_loop_insts.count(loop_pcs[i]) == 0)
+            have_body = false;
+      }
+
+      if (inst.is_branch && current_in_loop && !next_in_loop && have_body)
+      {
+         // The trace leaves the spin loop here: take the lock, or keep spinning while another thread holds it
+         exit_checked = true;
+         m_other_thread_holds_lock =!Sim()->getLockStateTracker()->tryClaim(m_thread->getId(), inst.sinst->addr,
+                                                                             prfmdl->getElapsedTime(), core->getInstructionCount());
 
          if (m_other_thread_holds_lock)
          {
+            printf("[SPIN REPLAY] Thread %d injecting %zu synthetic spin insns at branch PC 0x%lx (target 0x%lx)\n",
+                   m_thread->getId(), loop_pcs.size(),
+                   (unsigned long)inst.sinst->addr, (unsigned long)next_inst.sinst->addr);
+            fflush(stdout);
+
             Sift::Instruction deferred_next = next_inst;
 
             // Turn this branch into taken back into the loop
@@ -1640,6 +1685,60 @@ void TraceThread::checkAndReplaySpinLoop(Sift::Instruction &inst, Sift::Instruct
          }
       }
    }
+
+   // A thread that loads a lock variable at a spin-loop load and leaves the loop without a detected spin
+   // takes the lock here, or becomes a contender and redoes the loop until it can become the holder
+   if (Sim()->getLockStateTracker())
+   {
+      if (m_claim_load_pc != 0 && inst.is_branch)
+      {
+         IntPtr load_pc = m_claim_load_pc;
+         m_claim_load_pc = 0;
+
+         // A backward jump repeats the loop; otherwise the trace leaves it here
+         if (!exit_checked && next_inst.sinst->addr > inst.sinst->addr &&
+             !Sim()->getLockStateTracker()->tryClaimLoad(m_thread->getId(), m_claim_addr, inst.sinst->addr,
+                                                         prfmdl->getElapsedTime(), core->getInstructionCount()))
+         {
+            // Loop body seen by this thread: from the spin-loop load up to this branch
+            std::vector<IntPtr> body;
+            for (size_t i = m_sift_loop_order.size(); i-- > 0; )
+            {
+               body.insert(body.begin(), m_sift_loop_order[i]);
+               if (m_sift_loop_order[i] == load_pc)
+                  break;
+            }
+
+            if (body.size() > 1 && body[0] == load_pc)
+            {
+               m_other_thread_holds_lock = true;
+
+               printf("[SPIN REPLAY] Thread %d (contender) injecting %zu synthetic spin insns at branch PC 0x%lx (target 0x%lx)\n",
+                      m_thread->getId(), body.size(),
+                      (unsigned long)inst.sinst->addr, (unsigned long)next_inst.sinst->addr);
+               fflush(stdout);
+
+               Sift::Instruction deferred_next = next_inst;
+
+               // Turn this branch into taken back to the spin-loop load
+               inst.taken = true;
+               next_inst = m_sift_loop_insts[body[0]];
+
+               for (size_t k = 1; k < body.size(); ++k)
+               {
+                  Sift::Instruction syn_inst = m_sift_loop_insts[body[k]];
+                  if (k == body.size() - 1)
+                     syn_inst.taken = false;   // the exit branch again -> falls through to deferred_next -> re-checked
+                  m_injected_trace.push_back(syn_inst);
+               }
+
+               // Put back the original exit instruction at the end of the injected iteration
+               m_injected_trace.push_back(deferred_next);
+            }
+         }
+      }
+   }
+   return false;
 }
 
 void TraceThread::m_run_func_default()
@@ -1753,8 +1852,8 @@ void TraceThread::m_run_func_default()
                break;
 
             case InstMode::DETAILED:
-               checkAndReplaySpinLoop(inst, next_inst, core, prfmdl);
-               handleInstructionDetailed(inst, next_inst, prfmdl);
+               if (!checkAndReplaySpinLoop(inst, next_inst, core, prfmdl))
+                  handleInstructionDetailed(inst, next_inst, prfmdl);
                break;
 
             default:

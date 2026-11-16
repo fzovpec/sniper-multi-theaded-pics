@@ -13,6 +13,7 @@
 #include <cmath>
 #include <pthread.h>
 #include <cstdio>
+#include <cstring>
 #include <inttypes.h>
 
 static pthread_mutex_t s_sync_tracker_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -245,29 +246,16 @@ void SyncTracker::onInstructionCommit(thread_id_t tid, Instruction *ins, Subseco
    if (!ins)
       return;
 
-   const char *name = ins->getName();
    bool is_cmpxchg = false;
    bool is_xchg = false;
-
    const char *disas = ins->getDisassembly().empty() ? NULL : ins->getDisassembly().c_str();
 
-   if (ins->isAtomic() || (disas && (strstr(disas, "cmpxchg") != NULL || strstr(disas, "CMPXCHG") != NULL || strstr(disas, "xchg") != NULL || strstr(disas, "XCHG") != NULL)))
+   if (mem_addr != 0 && disas)
    {
-      if (name)
-      {
-         if (strstr(name, "CMPXCHG") != NULL || strstr(name, "cmpxchg") != NULL)
-            is_cmpxchg = true;
-         else if (strstr(name, "XCHG") != NULL || strstr(name, "xchg") != NULL)
-            is_xchg = true;
-      }
-      if (!is_cmpxchg && !is_xchg && disas)
-      {
-         if (strstr(disas, "cmpxchg") != NULL || strstr(disas, "CMPXCHG") != NULL)
-            is_cmpxchg = true;
-         else if (strstr(disas, "xchg") != NULL || strstr(disas, "XCHG") != NULL)
-            is_xchg = true;
-      }
-      fflush(stdout);
+      if (strcasestr(disas, "cmpxchg") != NULL)
+         is_cmpxchg = true;
+      else if (strcasestr(disas, "xchg") != NULL)
+         is_xchg = true;
    }
 
    bool lock_held_by_other = is_cmpxchg ? isLockHeldByOther(tid, mem_addr) : false;
@@ -304,9 +292,6 @@ void SyncTracker::onInstructionCommit(thread_id_t tid, Instruction *ins, Subseco
             s_lock_holder = tid;
             s_lock_acq_time[tid] = acq_time;
             s_deferred_acq[tid] = false;
-            printf("[FAST-PATH LOCK] Thread %d acquired lock (addr %p, t = %" PRIu64 " ns)\n",
-                   tid, (void*)mem_addr, acq_time.getNS());
-            fflush(stdout);
             Sim()->getStatsManager()->recordSyncEvent(tid, "end_lock_acquisition", acq_time.getNS(), mem_addr);
          }
          updateAtomicStates_locked();
@@ -316,13 +301,12 @@ void SyncTracker::onInstructionCommit(thread_id_t tid, Instruction *ins, Subseco
    {
       // Fast path unlock: only release if this thread holds the lock via fast-path (slow path locks can only be released on slow path / FUTEX_WAKE)
       // and no threads are sleeping in futex on this mutex.
-      IntPtr lock_address = mem_addr != 0 ? mem_addr : s_lock_addr[tid];
       bool has_waiters = false;
       for (auto &kv : s_waiting_threads)
       {
          if (kv.first != tid && kv.second.is_waiting && 
-             lock_address != 0 && kv.second.lock_address != 0 && 
-             kv.second.lock_address == lock_address)
+             kv.second.lock_address != 0 && 
+             kv.second.lock_address == mem_addr)
          {
             has_waiters = true;
             break;
@@ -330,14 +314,11 @@ void SyncTracker::onInstructionCommit(thread_id_t tid, Instruction *ins, Subseco
       }
 
       bool is_waiting = s_waiting_threads.count(tid) && s_waiting_threads[tid].is_waiting;
-      bool is_lock_wait_xchg = (disas && (strstr(disas, "eax") != NULL || strstr(disas, "EAX") != NULL));
+      bool is_lock_wait_xchg = (disas && strcasestr(disas, "eax") != NULL);
       if (!is_lock_wait_xchg && !is_waiting && !has_waiters && s_has_pending_lock[tid] && !s_is_slow_path[tid])
       {
-         printf("[FAST-PATH UNLOCK] Thread %d released lock (addr %p, t = %" PRIu64 " ns)\n",
-                tid, (void*)lock_address, time.getNS());
-         fflush(stdout);
          pthread_mutex_unlock(&s_sync_tracker_lock);
-         onUnlock(tid, time, lock_address);
+         onUnlock(tid, time, mem_addr);
          return;
       }
    }
@@ -369,6 +350,12 @@ void SyncTracker::onUnlock(thread_id_t tid, SubsecondTime time, IntPtr lock_addr
       return;
    }
 
+   if (s_lock_addr[tid] != 0 && lock_address != 0 && lock_address != s_lock_addr[tid])
+   {
+      pthread_mutex_unlock(&s_sync_tracker_lock);
+      return;
+   }
+
    if (s_lock_holder == tid)
    {
       s_is_lock_held = false;
@@ -384,9 +371,6 @@ void SyncTracker::onUnlock(thread_id_t tid, SubsecondTime time, IntPtr lock_addr
       if (final_addr != 0 && s_last_unlock_by_addr.count(final_addr) && s_last_unlock_by_addr[final_addr] > start_crit)
          start_crit = s_last_unlock_by_addr[final_addr];
       s_lock_acq_time[tid] = start_crit;
-      printf("[FAST-PATH LOCK] Thread %d acquired lock (addr %p, t = %" PRIu64 " ns)\n",
-             tid, (void*)final_addr, start_crit.getNS());
-      fflush(stdout);
       Sim()->getStatsManager()->recordSyncEvent(tid, "end_lock_acquisition", start_crit.getNS(), final_addr);
    }
 
@@ -412,12 +396,6 @@ void SyncTracker::onUnlock(thread_id_t tid, SubsecondTime time, IntPtr lock_addr
          s_lock_acq_time[other_tid] = acq_time;
          s_is_lock_held = true;
          s_lock_holder = other_tid;
-         if (!s_is_slow_path[other_tid])
-         {
-            printf("[FAST-PATH LOCK] Thread %d acquired lock (addr %p, t = %" PRIu64 " ns)\n",
-                   other_tid, (void*)final_addr, acq_time.getNS());
-            fflush(stdout);
-         }
          Sim()->getStatsManager()->recordSyncEvent(other_tid, "end_lock_acquisition", acq_time.getNS(), final_addr);
          break;
       }

@@ -138,11 +138,16 @@ class TraceThread : public Runnable
       // Spin-loop detection state
       bool m_is_spinning;
       bool m_other_thread_holds_lock;
+      // Last spin-loop load of a lock variable that was not followed by a branch yet (0 if none)
+      IntPtr m_claim_load_pc;
+      IntPtr m_claim_addr;
       std::deque<Sift::Instruction> m_injected_trace;
       std::unordered_map<IntPtr, Sift::Instruction> m_sift_loop_insts;
+      std::deque<IntPtr> m_sift_loop_order;
 
       bool readNextAppInstruction(Sift::Instruction &inst_out);
-      void checkAndReplaySpinLoop(Sift::Instruction &inst, Sift::Instruction &next_inst, Core* &core, PerformanceModel* &prfmdl);
+      // Returns true if inst is a spin loop instruction that must be skipped (not simulated)
+      bool checkAndReplaySpinLoop(Sift::Instruction &inst, Sift::Instruction &next_inst, Core* &core, PerformanceModel* &prfmdl);
 
       // Make run() a function pointer which is initialized in the constructor
       typedef void (TraceThread::*RunFunc)();
