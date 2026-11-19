@@ -11,10 +11,15 @@
 #include <inttypes.h>
 #include <cstdio>
 
-// Find the preferred store by another thread that overlaps [addr, addr + size)
+// Find the preferred store by another thread that overlaps [addr, addr + size).
+// Stores made before the reader started are ignored: the reader cannot be waiting for them
+// (e.g. the creating thread initializing the new thread's thread-local variables, or a lock before the workers start).
 bool SpinLoopDetectorTian::findRemoteWriter(IntPtr addr, UInt32 size, thread_id_t reader_tid, ShadowMemoryEntry &out_sme) const
 {
    bool found = false;
+
+   std::unordered_map<thread_id_t, UInt64>::const_iterator start_it = m_thread_start_seq.find(reader_tid);
+   UInt64 reader_start = (start_it != m_thread_start_seq.end()) ? start_it->second : 0;
 
    // Shadow memory is keyed by store address: a store overlaps if it starts inside the range or less than MAX_ACCESS_SIZE before it
    for (IntPtr store_addr = addr - (MAX_ACCESS_SIZE - 1); store_addr < addr + size; ++store_addr)
@@ -31,6 +36,8 @@ bool SpinLoopDetectorTian::findRemoteWriter(IntPtr addr, UInt32 size, thread_id_
 
          const ShadowMemoryEntry &cand = it->second;
          if (store_addr + cand.size <= addr)
+            continue;
+         if (cand.writeseq <= reader_start)
             continue;
 
          if (!found)
@@ -51,6 +58,10 @@ bool SpinLoopDetectorTian::findRemoteWriter(IntPtr addr, UInt32 size, thread_id_
    return found;
 }
 
+SpinLoopDetectorTian::~SpinLoopDetectorTian()
+{
+}
+
 void SpinLoopDetectorTian::resolveEpisode(Core *core, thread_id_t tid, const LoadTableEntry &entry)
 {
    if (!entry.possible_spin)
@@ -64,36 +75,11 @@ void SpinLoopDetectorTian::resolveEpisode(Core *core, thread_id_t tid, const Loa
 
       SubsecondTime spin_start = (entry.last_tcount > entry.accum_time) ? (entry.last_tcount - entry.accum_time) : SubsecondTime::Zero();
 
-      printf("[Tian Spin Detector] Confirmed Synchronization Pair: Read PC 0x%lx (Core %d) <--> Write PC 0x%lx (Thread %d) | Iterations: %u | Spin: T=%" PRIu64 " -> T=%" PRIu64 " ns (duration %" PRIu64 " ns)\n",
-             (unsigned long)entry.pc, core->getId(), (unsigned long)sme.writepc, sme.writetid,
-             entry.counter, spin_start.getNS(), entry.last_tcount.getNS(), entry.accum_time.getNS());
-      fflush(stdout);
-
       // Record synchronization events in SQLite stats for timeline plotting
       if (Sim()->getStatsManager())
       {
          Sim()->getStatsManager()->recordSyncEvent(tid, "begin_lock_acquisition", spin_start.getNS(), entry.addr);
          Sim()->getStatsManager()->recordSyncEvent(tid, "end_lock_acquisition", entry.last_tcount.getNS(), entry.addr);
-      }
-
-      if (m_prev_iteration.count(tid) > 0 && !m_prev_iteration[tid].empty())
-      {
-         const std::vector<RecordedInstruction> &body = m_prev_iteration[tid];
-         const size_t SHOW = 4;
-
-         // When was the sync variable written relative to this spin?
-         const char *status = (sme.writeseq <= entry.start_writeseq) ? "ALREADY updated before spin started" : "updated during spin";
-
-         printf("[Tian Loop Body] T%d: %zu insns [", tid, body.size());
-         for (size_t i = 0; i < body.size() && i < SHOW; ++i)
-            printf(" %lx", (unsigned long)(body[i].pc & 0xffff));
-         if (body.size() > 2 * SHOW)
-            printf(" ...");
-         for (size_t i = (body.size() > 2 * SHOW ? body.size() - SHOW : SHOW); i < body.size(); ++i)
-            printf(" %lx", (unsigned long)(body[i].pc & 0xffff));
-         printf(" ] | var %lx by T%d seq %" PRIu64 " vs start %" PRIu64 ": %s\n",
-                (unsigned long)(entry.addr & 0xffff), sme.writetid, sme.writeseq, entry.start_writeseq, status);
-         fflush(stdout);
       }
    }
 }
@@ -117,6 +103,9 @@ void SpinLoopDetectorTian::onMicroOpCommit(Core *core, thread_id_t tid, const Dy
    bool is_atomic = ins ? ins->isAtomic() : false;
 
    ScopedLock sl(m_lock);
+
+   if (m_thread_start_seq.find(tid) == m_thread_start_seq.end())
+      m_thread_start_seq[tid] = m_write_seq;
 
    // Record dynamic loop body instruction if this thread is actively spinning
    if (uop->isFirst() && m_active_spins.count(tid) > 0 && m_active_spins[tid].active)
@@ -192,7 +181,17 @@ void SpinLoopDetectorTian::onMicroOpCommit(Core *core, thread_id_t tid, const Dy
 
                ShadowMemoryEntry sme;
                if (Sim()->getLockStateTracker() && findRemoteWriter(loc->addr, loc->size, tid, sme))
-                  Sim()->getLockStateTracker()->onSpinStart(tid, loc->addr, loc->size, loc->pc);
+               {
+                  // Stores to the variable seen so far, per thread
+                  std::unordered_map<thread_id_t, UInt64> store_counts;
+                  std::unordered_map<IntPtr, std::unordered_map<thread_id_t, ShadowMemoryEntry>>::const_iterator sm = m_shadow_mem.find(loc->addr);
+                  if (sm != m_shadow_mem.end())
+                  {
+                     for (std::unordered_map<thread_id_t, ShadowMemoryEntry>::const_iterator s = sm->second.begin(); s != sm->second.end(); ++s)
+                        store_counts[s->first] = s->second.count;
+                  }
+                  Sim()->getLockStateTracker()->onSpinStart(tid, loc->addr, loc->size, loc->pc, store_counts);
+               }
             }
          }
          else
@@ -284,10 +283,12 @@ void SpinLoopDetectorTian::onMicroOpCommit(Core *core, thread_id_t tid, const Dy
       // Record store in shadow memory (prefer pure release stores over atomic RMW stores)
       m_write_seq++;
       std::unordered_map<thread_id_t, ShadowMemoryEntry> &writers = m_shadow_mem[mem_addr];
+      UInt64 store_count = (writers.find(tid) == writers.end()) ? 0 : writers[tid].count;
       if (!is_atomic || writers.find(tid) == writers.end())
       {
          writers[tid] = ShadowMemoryEntry(pc, tid, m_write_seq, is_atomic, mem_size);
       }
+      writers[tid].count = store_count + 1;
    }
 }
 

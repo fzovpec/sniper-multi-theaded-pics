@@ -78,6 +78,7 @@ class X86DecodedInst : public DecodedInst
     virtual bool is_serializing() const override;
     virtual bool is_conditional_branch() const override;
     virtual bool is_indirect_branch() const override;
+    virtual bool branch_target(uint64_t &target) const override;
     virtual bool is_barrier() const override;
     virtual bool src_dst_merge() const override;
     virtual bool is_X87() const override;

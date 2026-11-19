@@ -6,6 +6,7 @@
 #include <deque>
 #include <vector>
 #include <unordered_map>
+#include <unordered_set>
 
 class DynamicMicroOp;
 
@@ -24,10 +25,11 @@ class SpinLoopDetectorTian : public SpinLoopDetector
          UInt64 writeseq;
          bool is_atomic;
          UInt32 size;
+         UInt64 count;   // number of stores by this thread to this address
 
-         ShadowMemoryEntry() : writepc(0), writetid(-1), writeseq(0), is_atomic(false), size(0) {}
+         ShadowMemoryEntry() : writepc(0), writetid(-1), writeseq(0), is_atomic(false), size(0), count(0) {}
          ShadowMemoryEntry(IntPtr pc, thread_id_t tid, UInt64 seq, bool atomic, UInt32 _size)
-            : writepc(pc), writetid(tid), writeseq(seq), is_atomic(atomic), size(_size) {}
+            : writepc(pc), writetid(tid), writeseq(seq), is_atomic(atomic), size(_size), count(0) {}
       };
 
       struct LoadTableEntry
@@ -76,6 +78,9 @@ class SpinLoopDetectorTian : public SpinLoopDetector
       // Recorded loop body iterations: current in-progress vs previous completed
       std::unordered_map<thread_id_t, std::vector<RecordedInstruction>> m_current_iteration;
       std::unordered_map<thread_id_t, std::vector<RecordedInstruction>> m_prev_iteration;
+
+      // Write sequence number when each thread committed its first micro-op
+      std::unordered_map<thread_id_t, UInt64> m_thread_start_seq;
       // Global shadow memory: addr -> (tid -> last store by tid)
       std::unordered_map<IntPtr, std::unordered_map<thread_id_t, ShadowMemoryEntry>> m_shadow_mem;
 
@@ -85,7 +90,7 @@ class SpinLoopDetectorTian : public SpinLoopDetector
 
    public:
       SpinLoopDetectorTian(UInt32 threshold = 10) : m_threshold(threshold), m_write_seq(0) {}
-      virtual ~SpinLoopDetectorTian() {}
+      virtual ~SpinLoopDetectorTian();
 
       virtual void onMicroOpCommit(Core *core, thread_id_t tid, const DynamicMicroOp *uop, SubsecondTime time);
       virtual bool getRecordedLoopPCs(thread_id_t tid, std::vector<IntPtr> &out_pcs) override;

@@ -220,6 +220,10 @@ class DecodedInst
     /// Check if this instruction is an indirect branch
     virtual bool is_indirect_branch() const = 0;
 
+    /// Target of a direct branch (taken direction), whether it is taken or not in the trace.
+    /// Returns false if the instruction is not a direct branch or the decoder does not provide it.
+    virtual bool branch_target(uint64_t &target) const { return false; }
+
     /// Check if this instruction is a fence/barrier-type
     virtual bool is_barrier() const = 0;
 

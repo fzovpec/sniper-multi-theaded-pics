@@ -604,6 +604,18 @@ bool X86DecodedInst::is_conditional_branch() const
       static_cast<const xed_decoded_inst_t*>(&(this->xed_inst))) == XED_CATEGORY_COND_BR;
 }
 
+bool X86DecodedInst::branch_target(uint64_t &target) const
+{
+  const xed_decoded_inst_t *xi = static_cast<const xed_decoded_inst_t*>(&(this->xed_inst));
+  xed_category_enum_t cat = xed_decoded_inst_get_category(xi);
+  if (cat != XED_CATEGORY_COND_BR && cat != XED_CATEGORY_UNCOND_BR)
+    return false;
+  if (!xed_operand_values_has_branch_displacement(xed_decoded_inst_operands_const(xi)))
+    return false;   // indirect jump
+  target = this->m_address + xed_decoded_inst_get_length(xi) + (int64_t)xed_decoded_inst_get_branch_displacement(xi);
+  return true;
+}
+
 
 bool X86DecodedInst::is_indirect_branch() const
 {

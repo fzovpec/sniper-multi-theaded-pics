@@ -33,6 +33,8 @@
 #include "debug_config.h"
 #include <sstream>
 #include <vector>
+#include <chrono>
+#include <algorithm>
 
 // ---------------------------------------------------------------------------
 // Pin calling thread to a distinct host CPU chosen from the process's
@@ -98,6 +100,28 @@ TraceThread::TraceThread(Thread *thread, SubsecondTime time_start, String tracef
    , m_other_thread_holds_lock(false)
    , m_claim_load_pc(0)
    , m_claim_addr(0)
+   , m_check_pc(0)
+   , m_check_base(0)
+   , m_wait_base(0)
+   , m_wait_check_pc(0)
+   , m_wait_reported(false)
+   , m_sync_addr(0)
+   , m_sync_check_pc(0)
+   , m_sync_loop_pc(0)
+   , m_sync_passed(false)
+   , m_sync_provisional(false)
+   , m_sync_branch_since_check(false)
+   , m_sync_wait_reported(false)
+   , m_path_var(0)
+   , m_path_pc(0)
+   , m_path_overflow(false)
+   , m_synthetic_left(0)
+   , m_path_clean(false)
+   , m_path_replays(0)
+   , m_replays(0)
+   , m_injected_insns(0)
+   , m_skipped_insns(0)
+   , m_sync_skips(0)
 {
 
    bool userspace_mimicos_enabled = Sim()->getCfg()->getBool("general/enable_userspace_mimicos");
@@ -1547,6 +1571,9 @@ void TraceThread::m_run_func_with_userpace_mimicos()
    }
 
    printf("[TRACE:%u] -- %s --\n", m_thread->getId(), m_stop ? "STOP" : "DONE");
+   printf("[REPLAY SUMMARY] Thread %u: %lu spin iterations injected (%lu insns), %lu recorded spin insns skipped (%lu sync waits cut short)\n",
+          m_thread->getId(), (unsigned long)m_replays, (unsigned long)m_injected_insns,
+          (unsigned long)m_skipped_insns, (unsigned long)m_sync_skips);
    
    // Clean up ChampSim instruction cache to avoid leaks (destructor is never called)
    if (m_champsim_trace) {
@@ -1571,10 +1598,429 @@ bool TraceThread::readNextAppInstruction(Sift::Instruction &inst_out)
    return reader->Read(inst_out);
 }
 
+Lock TraceThread::s_spin_loops_lock;
+std::map<std::pair<IntPtr, IntPtr>, TraceThread::SpinLoop> TraceThread::s_spin_loops;
+std::map<IntPtr, IntPtr> TraceThread::s_last_loop;
+std::map<std::pair<IntPtr, IntPtr>, TraceThread::PreCheckLink> TraceThread::s_prechecks;
+
+const dl::DecodedInst &TraceThread::decoded(Sift::Instruction &inst)
+{
+   if (m_decoder_cache.count(inst.sinst->addr) == 0)
+      m_decoder_cache[inst.sinst->addr] = staticDecode(inst);
+   return *(m_decoder_cache[inst.sinst->addr]);
+}
+
+bool TraceThread::storesTo(Sift::Instruction &inst, IntPtr var_base)
+{
+   if (inst.num_addresses == 0 || !Sim()->getLockStateTracker())
+      return false;
+   const dl::DecodedInst &dec = decoded(inst);
+   unsigned int n = Sim()->getDecoder()->num_memory_operands(&dec);
+   for (unsigned int m = 0; m < n && m < inst.num_addresses; ++m)
+      if (Sim()->getDecoder()->op_write_mem(&dec, m) &&
+          Sim()->getLockStateTracker()->getVariableBase(va2pa(inst.addresses[m])) == var_base)
+         return true;
+   return false;
+}
+
+IntPtr TraceThread::otherSuccessor(Sift::Instruction &inst, IntPtr taken_pc)
+{
+   IntPtr fall = inst.sinst->addr + inst.sinst->size;
+   uint64_t target = 0;
+   if (!decoded(inst).branch_target(target))
+      return 0;
+   if (taken_pc == fall)
+      return target;
+   if (taken_pc == target)
+      return fall;
+   return 0;
+}
+
+bool TraceThread::getSpinLoop(IntPtr var_base, IntPtr load_pc, IntPtr &lo, IntPtr &hi)
+{
+   ScopedLock sl(s_spin_loops_lock);
+   std::map<std::pair<IntPtr, IntPtr>, SpinLoop>::iterator it = s_spin_loops.find(std::make_pair(var_base, load_pc));
+   if (it == s_spin_loops.end())
+      return false;
+   lo = it->second.lo;
+   hi = it->second.hi;
+   return true;
+}
+
+bool TraceThread::getSpinLoopInfo(IntPtr var_base, IntPtr load_pc, IntPtr &lo, IntPtr &hi, std::vector<IntPtr> &exits)
+{
+   ScopedLock sl(s_spin_loops_lock);
+   std::map<std::pair<IntPtr, IntPtr>, SpinLoop>::iterator it = s_spin_loops.find(std::make_pair(var_base, load_pc));
+   if (it == s_spin_loops.end())
+      return false;
+   lo = it->second.lo;
+   hi = it->second.hi;
+   exits = it->second.exits;
+   return true;
+}
+
+void TraceThread::learnSpinLoopFromPath(IntPtr var_base, IntPtr load_pc)
+{
+   // Only from the recorded trace: an injected iteration (replay) is not necessarily a whole iteration of this loop
+   if (m_path_overflow || !m_path_clean || m_path_replays != m_replays || m_path.size() < 2 || m_path[0].sinst->addr != load_pc)
+      return;
+   const std::pair<IntPtr, IntPtr> key(var_base, load_pc);
+   {
+      ScopedLock sl(s_spin_loops_lock);
+      if (s_spin_loops.count(key) > 0)
+         return;
+   }
+   // Only from a spin the detector reported: a path back to the load after the spin (an outer loop) is not an iteration
+   if (!Sim()->getLockStateTracker()->isSpinningOn(m_thread->getId(), var_base))
+      return;
+
+   SpinLoop loop;
+   loop.lo = loop.hi = load_pc;
+   for (size_t i = 0; i < m_path.size(); ++i)
+   {
+      IntPtr a = m_path[i].sinst->addr;
+      if (a < loop.lo) loop.lo = a;
+      if (a > loop.hi) loop.hi = a;
+   }
+   // Exits: successors of the path's branches outside the range (the taken target from the decoder if not taken here)
+   for (size_t i = 0; i < m_path.size(); ++i)
+   {
+      if (!m_path[i].is_branch)
+         continue;
+      IntPtr succ[2] = { m_path[i].sinst->addr + m_path[i].sinst->size, 0 };
+      uint64_t target = 0;
+      if (decoded(m_path[i]).branch_target(target))
+         succ[1] = target;
+      else if (i + 1 < m_path.size())
+         succ[1] = m_path[i + 1].sinst->addr;
+      for (int k = 0; k < 2; ++k)
+         if (succ[k] != 0 && (succ[k] < loop.lo || succ[k] > loop.hi) &&
+             std::find(loop.exits.begin(), loop.exits.end(), succ[k]) == loop.exits.end())
+            loop.exits.push_back(succ[k]);
+   }
+   for (size_t i = 0; i < m_path.size(); ++i)
+   {
+      Sift::Instruction copy = m_path[i];
+      // The reader that owns the static instruction goes away with its thread: keep a copy (never freed)
+      Sift::StaticInstruction *sinst = new Sift::StaticInstruction(*copy.sinst);
+      sinst->next = NULL;
+      copy.sinst = sinst;
+      loop.insts.push_back(copy);
+   }
+
+   ScopedLock sl(s_spin_loops_lock);
+   if (s_spin_loops.count(key) > 0)
+      return;
+   s_spin_loops[key] = loop;
+   s_last_loop[var_base] = load_pc;
+
+   printf("[SPIN LOOP] Variable 0x%lx: spin loop at load PC 0x%lx: PC 0x%lx - 0x%lx (%zu insns), exits:",
+          (unsigned long)var_base, (unsigned long)load_pc, (unsigned long)loop.lo, (unsigned long)loop.hi, loop.insts.size());
+   for (size_t e = 0; e < loop.exits.size() && e < 4; ++e)
+      printf(" 0x%lx", (unsigned long)loop.exits[e]);
+   printf("%s (Thread %d)\n", loop.exits.size() > 4 ? " ..." : "", m_thread->getId());
+   fflush(stdout);
+}
+
+void TraceThread::countVisits(Sift::Instruction &inst)
+{
+   if (inst.num_addresses > 0)
+   {
+      const dl::DecodedInst &dec = decoded(inst);
+      unsigned int n = Sim()->getDecoder()->num_memory_operands(&dec);
+      IntPtr pc = inst.sinst->addr;
+
+      // Reads (not the read of an atomic read-modify-write instruction)
+      if (!dec.is_atomic())
+      {
+         for (unsigned int m = 0; m < n && m < inst.num_addresses; ++m)
+         {
+            if (!Sim()->getDecoder()->op_read_mem(&dec, m))
+               continue;
+            IntPtr addr = va2pa(inst.addresses[m]);
+            m_reads_since_branch.insert(addr);
+            if (m_visit_addrs.find(addr) == m_visit_addrs.end())
+            {
+               m_visit_addrs[addr] = pc;
+               PcVisits &pv = m_pc_visits[pc];
+               if (pv.addr != addr)
+               {
+                  pv.addr = addr;
+                  pv.visits = 0;
+               }
+               pv.visits++;
+            }
+         }
+      }
+
+      // Writes end every visit in progress; a visit to the written address read since the last branch is undone
+      bool stored = false;
+      for (unsigned int m = 0; m < n && m < inst.num_addresses; ++m)
+      {
+         if (!Sim()->getDecoder()->op_write_mem(&dec, m))
+            continue;
+         stored = true;
+         IntPtr addr = va2pa(inst.addresses[m]);
+         std::unordered_map<IntPtr, IntPtr>::const_iterator v = m_visit_addrs.find(addr);
+         if (v != m_visit_addrs.end() && m_reads_since_branch.count(addr) > 0)
+         {
+            PcVisits &pv = m_pc_visits[v->second];
+            if (pv.addr == addr && pv.visits > 0)
+               pv.visits--;
+         }
+      }
+      if (stored && !m_visit_addrs.empty())
+      {
+         if (m_visit_addrs.bucket_count() > 64)
+            std::unordered_map<IntPtr, IntPtr>().swap(m_visit_addrs);   // after a long read-only stretch: free the buckets
+         else
+            m_visit_addrs.clear();
+      }
+   }
+   if (inst.is_branch)
+      m_reads_since_branch.clear();
+}
+
+UInt64 TraceThread::frontendEarlierWaits(IntPtr addr) const
+{
+   UInt64 waits = 0;
+   for (std::unordered_map<IntPtr, PcVisits>::const_iterator p = m_pc_visits.begin(); p != m_pc_visits.end(); ++p)
+      if (p->second.addr == addr)
+         waits += p->second.visits;
+   if (m_visit_addrs.count(addr) > 0 && waits > 0)
+      waits--;
+   return waits;
+}
+
+bool TraceThread::isPreCheckOf(const LoneCheck &lone, IntPtr var_base, IntPtr loop_pc)
+{
+   IntPtr lo, hi;
+   std::vector<IntPtr> exits;
+   if (!getSpinLoopInfo(var_base, loop_pc, lo, hi, exits))
+      return false;
+   // Entry side: from the branch, the trace went (past nops) into the loop
+   if (lone.first_real != 0 && lone.first_real >= lo && lone.first_real <= hi)
+      return true;
+   // Exit side: the branch's other successor is where the loop exits
+   return lone.other != 0 && std::find(exits.begin(), exits.end(), lone.other) != exits.end();
+}
+
+void TraceThread::linkPreCheck(const LoneCheck &lone, IntPtr var_base, IntPtr loop_pc)
+{
+   if (lone.pc == loop_pc)
+      return;   // the loop's own check (a provisional wait chained over iterations of a loop not learned yet)
+   ScopedLock sl(s_spin_loops_lock);
+   const std::pair<IntPtr, IntPtr> key(var_base, lone.pc);
+   if (s_prechecks.count(key) > 0)
+      return;
+   PreCheckLink link;
+   link.loop_pc = loop_pc;
+   link.into = lone.taken;
+   s_prechecks[key] = link;
+   printf("[SPIN LOOP] Variable 0x%lx: check at PC 0x%lx is the pre-check of the spin loop at load PC 0x%lx (goes into it at 0x%lx) (Thread %d)\n",
+          (unsigned long)var_base, (unsigned long)lone.pc, (unsigned long)loop_pc, (unsigned long)lone.taken, m_thread->getId());
+   fflush(stdout);
+}
+
+bool TraceThread::injectSpinLoop(Sift::Instruction &inst, Sift::Instruction &next_inst, IntPtr var_base, IntPtr load_pc)
+{
+   std::vector<Sift::Instruction> cycle;
+   IntPtr lo;
+   {
+      ScopedLock sl(s_spin_loops_lock);
+      std::map<std::pair<IntPtr, IntPtr>, SpinLoop>::iterator it = s_spin_loops.find(std::make_pair(var_base, load_pc));
+      if (it == s_spin_loops.end())
+         return false;
+      cycle = it->second.insts;
+      lo = it->second.lo;
+   }
+
+   // The stored loop carries the memory addresses of the thread that recorded it. Only the tracked variable is at the
+   // same address for every thread; anything else (e.g. a thread-local operand, %fs:...) must be this thread's own.
+   // Use this thread's latest instance of the instruction, else keep it only if all its accesses are to the variable,
+   // else leave it out of the replay rather than access another thread's memory.
+   std::vector<Sift::Instruction> own;
+   for (size_t k = 0; k < cycle.size(); ++k)
+   {
+      Sift::Instruction b = cycle[k];
+      if (b.num_addresses > 0)
+      {
+         std::unordered_map<IntPtr, Sift::Instruction>::iterator mine = m_sift_loop_insts.find(b.sinst->addr);
+         if (mine != m_sift_loop_insts.end() && mine->second.num_addresses == b.num_addresses)
+         {
+            for (int a = 0; a < b.num_addresses; ++a)
+               b.addresses[a] = mine->second.addresses[a];
+         }
+         else
+         {
+            bool only_var = true;
+            for (int a = 0; a < b.num_addresses; ++a)
+               if (Sim()->getLockStateTracker()->getVariableBase(va2pa(b.addresses[a])) != var_base)
+                  only_var = false;
+            if (!only_var)
+               continue;
+         }
+      }
+      own.push_back(b);
+   }
+   if (own.size() < 2)
+      return false;
+
+   IntPtr pc = inst.sinst->addr;
+   Sift::Instruction deferred_next = next_inst;
+
+   // This branch is on the loop: the replay goes once around the loop from this branch's other successor and ends on
+   // this branch again, with its recorded outcome (-> deferred_next, checked again there)
+   size_t at = own.size();
+   for (size_t k = 0; k < own.size(); ++k)
+      if (own[k].sinst->addr == pc)
+      {
+         at = k;
+         break;
+      }
+   std::vector<Sift::Instruction> seq;
+   if (at < own.size())
+   {
+      Sift::Instruction again = inst;   // this branch again at the end, with its recorded outcome
+      for (size_t k = 1; k < own.size(); ++k)
+         seq.push_back(own[(at + k) % own.size()]);
+      inst.taken = (seq[0].sinst->addr != pc + inst.sinst->size);
+      next_inst = seq[0];
+      for (size_t k = 1; k < seq.size(); ++k)
+         m_injected_trace.push_back(seq[k]);
+      m_injected_trace.push_back(again);
+      m_injected_trace.push_back(deferred_next);
+   }
+   else
+   {
+      // A branch outside the loop (e.g. a pre-check's): one iteration from the loop's head; its closing branch then
+      // leaves the loop to deferred_next
+      size_t head = 0;
+      for (size_t k = 0; k < own.size(); ++k)
+         if (own[k].sinst->addr == lo)
+         {
+            head = k;
+            break;
+         }
+      Sift::Instruction again = inst;   // the held branch again at the end, with its recorded outcome
+      for (size_t k = 0; k < own.size(); ++k)
+         seq.push_back(own[(head + k) % own.size()]);
+      inst.taken = (seq[0].sinst->addr != pc + inst.sinst->size);
+      next_inst = seq[0];
+      for (size_t k = 1; k < seq.size(); ++k)
+         m_injected_trace.push_back(seq[k]);
+      if (m_injected_trace.back().is_branch)
+         m_injected_trace.back().taken = false;
+      m_injected_trace.push_back(again);
+      m_injected_trace.push_back(deferred_next);
+   }
+
+   m_synthetic_left = seq.size();
+   m_replays++;
+   m_injected_insns += seq.size();
+   return true;
+}
+
+bool TraceThread::injectFallback(Sift::Instruction &inst, Sift::Instruction &next_inst, IntPtr var_base, IntPtr check_pc)
+{
+   IntPtr last_pc = 0;
+   {
+      ScopedLock sl(s_spin_loops_lock);
+      std::map<IntPtr, IntPtr>::iterator l = s_last_loop.find(var_base);
+      if (l != s_last_loop.end())
+         last_pc = l->second;
+   }
+   if (last_pc != 0 && injectSpinLoop(inst, next_inst, var_base, last_pc))
+      return true;
+
+   // What this thread executed from the check up to this branch
+   std::vector<IntPtr> body;
+   for (size_t i = m_sift_loop_order.size(); i-- > 0; )
+   {
+      body.insert(body.begin(), m_sift_loop_order[i]);
+      if (m_sift_loop_order[i] == check_pc)
+         break;
+   }
+   if (body.size() < 2 || body[0] != check_pc)
+      return false;
+
+   Sift::Instruction deferred_next = next_inst;
+   // Turn this branch into taken back to the check; the last one is this branch again, with its recorded outcome
+   inst.taken = true;
+   next_inst = m_sift_loop_insts[body[0]];
+   for (size_t k = 1; k < body.size(); ++k)
+      m_injected_trace.push_back(m_sift_loop_insts[body[k]]);
+   m_injected_trace.push_back(deferred_next);
+
+   m_synthetic_left = body.size() - 1;   // the last one is the held branch itself
+   m_replays++;
+   m_injected_insns += body.size();
+   return true;
+}
+
+void TraceThread::cutShortSpin(Sift::Instruction &inst, Sift::Instruction &next_inst, IntPtr var_base, IntPtr lo, IntPtr hi, PerformanceModel *prfmdl)
+{
+   IntPtr resume_pc = next_inst.sinst->addr;
+   Sift::Instruction resume = next_inst;
+   std::vector<Sift::Instruction> tail;   // what follows 'resume' in the recorded trace, up to the first instruction out of [lo, hi]
+   UInt64 skipped = 0, read = 0;
+   double timeout = Sim()->getLockStateTracker()->getStuckTimeout();
+   std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
+
+   while (true)
+   {
+      Sift::Instruction r;
+      if (!readNextAppInstruction(r))
+         break;
+      tail.push_back(r);
+      if (r.sinst->addr < lo || r.sinst->addr > hi)
+         break;
+      if (r.sinst->addr == resume_pc)
+      {
+         // A later time at the same point: resume there instead
+         skipped += tail.size();
+         resume = r;
+         tail.clear();
+      }
+      // The recorded spin only ends when the native thread gets past it: if that never happens, report it
+      if (timeout > 0 && (++read & 0xfff) == 0)
+      {
+         double secs = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+         if (secs >= timeout)
+         {
+            char what[256];
+            snprintf(what, sizeof(what), "STUCK: the recorded spin never ends (skipping the rest of the spin after a pass: loop 0x%lx - 0x%lx, "
+                     "branch 0x%lx, the recorded trace is at PC 0x%lx after %lu instructions)",
+                     (unsigned long)lo, (unsigned long)hi, (unsigned long)inst.sinst->addr, (unsigned long)r.sinst->addr, (unsigned long)read);
+            Sim()->getLockStateTracker()->reportStuck(var_base, m_thread->getId(), what, secs, prfmdl->getElapsedTime());
+         }
+      }
+   }
+
+   next_inst = resume;
+   for (size_t k = tail.size(); k-- > 0; )
+      m_injected_trace.push_front(tail[k]);
+
+   if (skipped > 0)
+   {
+      m_sync_skips++;
+      m_skipped_insns += skipped;
+   }
+}
+
 bool TraceThread::checkAndReplaySpinLoop(Sift::Instruction &inst, Sift::Instruction &next_inst, Core* &core, PerformanceModel* &prfmdl)
 {
    if (!inst.sinst || !next_inst.sinst)
       return false;
+
+   // An instruction injected by a replay (not the held branch it comes back to)
+   bool synthetic = (m_synthetic_left > 0);
+   if (synthetic)
+      m_synthetic_left--;
+
+   // Wait counting from this thread's own reads (only the recorded trace, not replays)
+   if (!synthetic && Sim()->getLockStateTracker())
+      countVisits(inst);
 
    m_sift_loop_insts[inst.sinst->addr] = inst;
    m_sift_loop_order.push_back(inst.sinst->addr);
@@ -1605,11 +2051,76 @@ bool TraceThread::checkAndReplaySpinLoop(Sift::Instruction &inst, Sift::Instruct
       m_is_spinning = Sim()->getLockStateTracker()->isSpinning(m_thread->getId());
    }
 
-   // Remember the last spin-loop load of a lock variable until the branch that follows it
-   if (Sim()->getLockStateTracker() && inst.num_addresses > 0 && Sim()->getLockStateTracker()->isSpinLoad(inst.sinst->addr))
+   // Check of a tracked variable: spin-loop load of a lock, or any load of a sync variable.
+   // A lock check is remembered until the branch that follows it.
+   IntPtr sync_check_addr = 0;
+   IntPtr check_now = 0;   // base of the variable this instruction checks (0 if it is not a check)
+   if (Sim()->getLockStateTracker() && inst.num_addresses > 0 &&
+       Sim()->getLockStateTracker()->isWaitLoad(inst.sinst->addr, va2pa(inst.addresses[0])))
    {
-      m_claim_load_pc = inst.sinst->addr;
-      m_claim_addr = va2pa(inst.addresses[0]);
+      // Only an instruction that just reads the variable is a check
+      const dl::DecodedInst &dec_inst = decoded(inst);
+
+      if (Sim()->getDecoder()->num_memory_operands(&dec_inst) > 0 &&
+          Sim()->getDecoder()->op_read_mem(&dec_inst, 0) &&
+          !Sim()->getDecoder()->op_write_mem(&dec_inst, 0))
+      {
+         m_check_pc = inst.sinst->addr;
+         m_check_base = Sim()->getLockStateTracker()->getVariableBase(va2pa(inst.addresses[0]));
+         check_now = m_check_base;
+
+         // First check of this variable by this thread: hand over the waits it completed on it so far
+         if (m_check_base != 0 && !synthetic && m_provided_vars.insert(m_check_base).second)
+            Sim()->getLockStateTracker()->provideEarlierWaits(m_thread->getId(), m_check_base, frontendEarlierWaits(m_check_base));
+
+         if (Sim()->getLockStateTracker()->isSyncVariable(va2pa(inst.addresses[0])))
+         {
+            sync_check_addr = m_check_base;
+         }
+         else
+         {
+            m_claim_load_pc = inst.sinst->addr;
+            m_claim_addr = va2pa(inst.addresses[0]);
+
+            // Wait episodes on a lock; the first check at a spin load is the start of the wait (lock pattern).
+            // (Waits on sync variables are reported by the sync logic below.)
+            if (m_check_base != 0)
+            {
+               if (m_wait_base != m_check_base)
+               {
+                  m_wait_base = m_check_base;
+                  m_wait_reported = false;
+               }
+               m_wait_check_pc = inst.sinst->addr;
+               if (!m_wait_reported && Sim()->getLockStateTracker()->isSpinLoad(inst.sinst->addr))
+               {
+                  Sim()->getLockStateTracker()->onWaitStart(m_thread->getId(), m_wait_base, inst.sinst->addr, prfmdl->getElapsedTime());
+                  m_wait_reported = true;
+               }
+            }
+         }
+      }
+   }
+
+   // Path since the last check: back at the same check of the same variable closes one iteration of its spin loop
+   if (check_now != 0)
+   {
+      if (m_path_pc == inst.sinst->addr && m_path_var == check_now)
+         learnSpinLoopFromPath(check_now, m_path_pc);
+      m_path.clear();
+      m_path_overflow = false;
+      m_path_var = check_now;
+      m_path_pc = inst.sinst->addr;
+      m_path_clean = m_injected_trace.empty();
+      m_path_replays = m_replays;
+      m_path.push_back(inst);
+   }
+   else if (m_path_pc != 0)
+   {
+      if (m_path.size() < MAX_PATH)
+         m_path.push_back(inst);
+      else
+         m_path_overflow = true;
    }
 
    bool exit_checked = false;
@@ -1638,7 +2149,10 @@ bool TraceThread::checkAndReplaySpinLoop(Sift::Instruction &inst, Sift::Instruct
       // Early exit: the lock was released but the trace keeps spinning, so skip the rest of the recorded spin.
       // The thread still takes the lock at its own recorded exit, so the handoff order follows the trace.
       if (current_in_loop && next_in_loop && Sim()->getLockStateTracker()->isLockFree(m_thread->getId()))
+      {
+         m_skipped_insns++;
          return true;
+      }
 
       // The recorded loop body can be from an older spin: it is only replayed if this thread still has all its instructions
       bool have_body = true;
@@ -1648,20 +2162,18 @@ bool TraceThread::checkAndReplaySpinLoop(Sift::Instruction &inst, Sift::Instruct
             have_body = false;
       }
 
-      if (inst.is_branch && current_in_loop && !next_in_loop && have_body)
+      IntPtr stored_lo, stored_hi;
+      bool have_stored = m_check_base != 0 && getSpinLoop(m_check_base, m_check_pc, stored_lo, stored_hi);
+
+      if (inst.is_branch && current_in_loop && !next_in_loop && (have_body || have_stored))
       {
          // The trace leaves the spin loop here: take the lock, or keep spinning while another thread holds it
          exit_checked = true;
          m_other_thread_holds_lock =!Sim()->getLockStateTracker()->tryClaim(m_thread->getId(), inst.sinst->addr,
                                                                              prfmdl->getElapsedTime(), core->getInstructionCount());
 
-         if (m_other_thread_holds_lock)
+         if (m_other_thread_holds_lock && !injectSpinLoop(inst, next_inst, m_check_base, m_check_pc))
          {
-            printf("[SPIN REPLAY] Thread %d injecting %zu synthetic spin insns at branch PC 0x%lx (target 0x%lx)\n",
-                   m_thread->getId(), loop_pcs.size(),
-                   (unsigned long)inst.sinst->addr, (unsigned long)next_inst.sinst->addr);
-            fflush(stdout);
-
             Sift::Instruction deferred_next = next_inst;
 
             // Turn this branch into taken back into the loop
@@ -1682,6 +2194,9 @@ bool TraceThread::checkAndReplaySpinLoop(Sift::Instruction &inst, Sift::Instruct
 
             // Put back the original exit instruction at the end of the injected iteration
             m_injected_trace.push_back(deferred_next);
+
+            m_replays++;
+            m_injected_insns += N;
          }
       }
    }
@@ -1696,27 +2211,31 @@ bool TraceThread::checkAndReplaySpinLoop(Sift::Instruction &inst, Sift::Instruct
          m_claim_load_pc = 0;
 
          // A backward jump repeats the loop; otherwise the trace leaves it here
-         if (!exit_checked && next_inst.sinst->addr > inst.sinst->addr &&
+         if (!exit_checked &&
+             next_inst.sinst->addr > inst.sinst->addr &&
              !Sim()->getLockStateTracker()->tryClaimLoad(m_thread->getId(), m_claim_addr, inst.sinst->addr,
                                                          prfmdl->getElapsedTime(), core->getInstructionCount()))
          {
-            // Loop body seen by this thread: from the spin-loop load up to this branch
+            // Replay the stored spin loop of the lock if there is one, otherwise what this thread saw: from the spin-loop load up to this branch
+            IntPtr lock_base = Sim()->getLockStateTracker()->getVariableBase(m_claim_addr);
             std::vector<IntPtr> body;
-            for (size_t i = m_sift_loop_order.size(); i-- > 0; )
-            {
-               body.insert(body.begin(), m_sift_loop_order[i]);
-               if (m_sift_loop_order[i] == load_pc)
-                  break;
-            }
-
-            if (body.size() > 1 && body[0] == load_pc)
+            if (lock_base != 0 && injectSpinLoop(inst, next_inst, lock_base, load_pc))
             {
                m_other_thread_holds_lock = true;
+            }
+            else
+            {
+               for (size_t i = m_sift_loop_order.size(); i-- > 0; )
+               {
+                  body.insert(body.begin(), m_sift_loop_order[i]);
+                  if (m_sift_loop_order[i] == load_pc)
+                     break;
+               }
+            }
 
-               printf("[SPIN REPLAY] Thread %d (contender) injecting %zu synthetic spin insns at branch PC 0x%lx (target 0x%lx)\n",
-                      m_thread->getId(), body.size(),
-                      (unsigned long)inst.sinst->addr, (unsigned long)next_inst.sinst->addr);
-               fflush(stdout);
+            if (!m_other_thread_holds_lock && body.size() > 1 && body[0] == load_pc)
+            {
+               m_other_thread_holds_lock = true;
 
                Sift::Instruction deferred_next = next_inst;
 
@@ -1724,20 +2243,273 @@ bool TraceThread::checkAndReplaySpinLoop(Sift::Instruction &inst, Sift::Instruct
                inst.taken = true;
                next_inst = m_sift_loop_insts[body[0]];
 
+               // The last one is this branch again, with its recorded outcome -> continues to deferred_next -> re-checked
                for (size_t k = 1; k < body.size(); ++k)
                {
-                  Sift::Instruction syn_inst = m_sift_loop_insts[body[k]];
-                  if (k == body.size() - 1)
-                     syn_inst.taken = false;   // the exit branch again -> falls through to deferred_next -> re-checked
-                  m_injected_trace.push_back(syn_inst);
+                  m_injected_trace.push_back(m_sift_loop_insts[body[k]]);
                }
 
                // Put back the original exit instruction at the end of the injected iteration
                m_injected_trace.push_back(deferred_next);
+
+               m_replays++;
+               m_injected_insns += body.size();
             }
          }
       }
    }
+
+   // Sync variable waits (each wait uses one write by another thread; a wait is never passed without one).
+   // - At a check: decide whether it is the same wait or a new one (pre-check of a loop -> same wait).
+   // - At a branch: in the bounding loop's range -> still waiting (after a pass the rest of the recorded spin is
+   //   skipped); leaving with no write yet -> held: the loop is replayed until the write commits.
+   // - A read of the variable followed by a store to it with no branch in between is a read-modify-write, not a wait.
+   LockStateTracker *tracker = Sim()->getLockStateTracker();
+   if (tracker && !m_other_thread_holds_lock && synthetic)
+   {
+      // Inside a replay: only check again whether the write is there for the held wait
+      if (sync_check_addr != 0 && sync_check_addr == m_sync_addr && !m_sync_passed && !m_sync_provisional)
+         m_sync_passed = tracker->tryPassSync(m_thread->getId(), m_sync_addr, inst.sinst->addr,
+                                              prfmdl->getElapsedTime(), core->getInstructionCount(), false, true);
+   }
+   else if (tracker && !m_other_thread_holds_lock)
+   {
+      thread_id_t tid = m_thread->getId();
+
+      // The lone check memory: first non-nop instruction after its branch, and how long ago it was
+      if (m_lone.valid)
+      {
+         if (++m_lone.insns_since > LONE_WINDOW)
+            m_lone.valid = false;
+         else if (m_lone.first_real == 0 && !decoded(inst).is_nop())
+            m_lone.first_real = inst.sinst->addr;
+      }
+
+      // Stores by this thread to the variable of the open wait or of the lone check
+      if (inst.num_addresses > 0 && (m_sync_addr != 0 || m_lone.valid))
+      {
+         if (m_sync_addr != 0 && storesTo(inst, m_sync_addr))
+         {
+            if (!m_sync_branch_since_check)
+            {
+               // Read, then store with no branch in between: a read-modify-write (e.g. a ticketlock release), not a wait
+               tracker->undoWait(tid, m_sync_addr, m_sync_check_pc, inst.sinst->addr, prfmdl->getElapsedTime());
+               m_sync_addr = 0;
+               m_sync_provisional = false;
+            }
+         }
+         if (m_lone.valid && storesTo(inst, m_lone.var))
+            m_lone.valid = false;
+      }
+
+      if (sync_check_addr != 0)
+      {
+         IntPtr var = sync_check_addr;
+         IntPtr pc = inst.sinst->addr;
+         IntPtr lo = 0, hi = 0;
+         bool has_loop = getSpinLoop(var, pc, lo, hi);
+         bool new_wait = false;
+
+         if (m_sync_addr == var)
+         {
+            // Same wait: still in its loop, or on the way into it from a linked pre-check
+            if (m_sync_provisional && has_loop)
+            {
+               // Settle a provisional wait now that this check's loop is known
+               m_sync_provisional = false;
+               if (isPreCheckOf(m_prov_lone, var, pc))
+                  linkPreCheck(m_prov_lone, var, pc);
+               else
+               {
+                  new_wait = true;
+                  m_sync_passed = false;
+                  m_sync_wait_reported = false;
+               }
+            }
+         }
+         else if (m_lone.valid && m_lone.var == var)
+         {
+            // Straight from a passed lone check of the same variable: its pre-check (same wait) or a new wait.
+            // If that lone check only ended a provisional wait (iterations of a loop not learned yet), the check to
+            // compare is still the provisional wait's original one, not this loop's own check.
+            const LoneCheck &from = m_lone.chained ? m_prov_lone : m_lone;
+            if (has_loop)
+            {
+               if (isPreCheckOf(from, var, pc))
+                  linkPreCheck(from, var, pc);
+               else
+                  new_wait = true;
+            }
+            else
+            {
+               // This check's loop is not known yet: same wait for now, settled once it is learned
+               if (!m_lone.chained)
+                  m_prov_lone = m_lone;
+               m_sync_provisional = true;
+            }
+            m_sync_addr = var;
+            m_sync_passed = !new_wait;
+            m_sync_loop_pc = 0;
+            if (new_wait)
+               m_sync_wait_reported = false;
+         }
+         else
+         {
+            new_wait = true;
+            m_sync_addr = var;
+            m_sync_passed = false;
+            m_sync_provisional = false;
+            m_sync_loop_pc = 0;
+            m_sync_wait_reported = false;
+         }
+         m_lone.valid = false;
+
+         m_sync_check_pc = pc;
+         m_sync_branch_since_check = false;
+         if (has_loop && (m_sync_loop_pc == 0 || new_wait))
+            m_sync_loop_pc = pc;
+
+         if (!m_sync_passed && !m_sync_provisional)
+            m_sync_passed = tracker->tryPassSync(tid, var, pc, prfmdl->getElapsedTime(), core->getInstructionCount(), new_wait);
+
+         // Lock pattern: the start of a wait is its first check at a spin load
+         if (!m_sync_wait_reported && tracker->isSpinLoad(pc))
+         {
+            tracker->onWaitStart(tid, var, pc, prfmdl->getElapsedTime());
+            m_sync_wait_reported = true;
+         }
+      }
+
+      if (m_sync_addr != 0 && !tracker->isSyncVariable(m_sync_addr))
+      {
+         m_sync_addr = 0;   // the variable is a lock now
+         m_sync_provisional = false;
+      }
+      if (m_lone.valid && !tracker->isSyncVariable(m_lone.var))
+         m_lone.valid = false;
+
+      if (m_sync_addr != 0 && inst.is_branch && m_sync_provisional)
+      {
+         // First branch after a provisional check: was the earlier lone check its pre-check? Compare the branches:
+         // entry side: from the lone check's branch the trace went (past nops) to where this branch jumps back to;
+         // exit side: the lone check's branch's other successor is a successor of this branch (where the loop exits)
+         IntPtr pc = inst.sinst->addr;
+         IntPtr fall = pc + inst.sinst->size;
+         uint64_t target = 0;
+         bool has_target = decoded(inst).branch_target(target);
+         const LoneCheck &from = m_prov_lone;
+         bool entry = has_target && (IntPtr)target <= m_sync_check_pc && from.first_real == (IntPtr)target;
+         bool exit = from.other != 0 && (from.other == fall || (has_target && from.other == (IntPtr)target));
+         m_sync_provisional = false;
+         if (entry || exit)
+            linkPreCheck(from, m_sync_addr, m_sync_check_pc);
+         else
+         {
+            // Not a pre-check's loop: this check is a wait of its own, it takes its write now (or is held below)
+            m_sync_passed = tracker->tryPassSync(m_thread->getId(), m_sync_addr, m_sync_check_pc,
+                                                 prfmdl->getElapsedTime(), core->getInstructionCount(), true);
+            m_sync_wait_reported = false;
+            if (tracker->isSpinLoad(m_sync_check_pc))
+            {
+               tracker->onWaitStart(m_thread->getId(), m_sync_addr, m_sync_check_pc, prfmdl->getElapsedTime());
+               m_sync_wait_reported = true;
+            }
+         }
+      }
+
+      if (m_sync_addr != 0 && inst.is_branch)
+      {
+         IntPtr var = m_sync_addr;
+         IntPtr pc = inst.sinst->addr;
+         IntPtr lo = 0, hi = 0;
+         bool in_loop = (m_sync_loop_pc != 0) && getSpinLoop(var, m_sync_loop_pc, lo, hi);
+
+         if (in_loop)
+         {
+            // In the range of the bounding loop: still waiting. After a pass, skip the rest of the recorded spin.
+            if (m_sync_passed && next_inst.sinst->addr >= lo && next_inst.sinst->addr <= hi)
+               cutShortSpin(inst, next_inst, var, lo, hi, prfmdl);
+
+            IntPtr next_pc = next_inst.sinst->addr;
+            if (next_pc < lo || next_pc > hi)
+            {
+               if (m_sync_passed)
+                  m_sync_addr = 0;   // the wait is over
+               else if (injectSpinLoop(inst, next_inst, var, m_sync_loop_pc) ||
+                        injectFallback(inst, next_inst, var, m_sync_check_pc))
+                  m_other_thread_holds_lock = true;   // held: one more iteration, then back to this branch
+               else
+                  tracker->reportStuck(var, tid, "STUCK: cannot hold the thread (no loop to replay)", 0, prfmdl->getElapsedTime());
+            }
+         }
+         else
+         {
+            // No loop bounds this wait: a lone check (a pre-check, a one-off read) or a loop not learned yet
+            IntPtr next_pc = next_inst.sinst->addr;
+            PreCheckLink link;
+            bool linked = false;
+            {
+               ScopedLock sl(s_spin_loops_lock);
+               std::map<std::pair<IntPtr, IntPtr>, PreCheckLink>::iterator l = s_prechecks.find(std::make_pair(var, m_sync_check_pc));
+               if (l != s_prechecks.end())
+               {
+                  link = l->second;
+                  linked = true;
+               }
+            }
+
+            if (next_pc <= m_sync_check_pc && tracker->isSpinLoad(m_sync_check_pc))
+            {
+               // A confirmed spin load whose loop is not learned yet, branching back to (or before) it: the native
+               // trace is still spinning, the same wait goes on (its real iterations are what the loop is learned from)
+            }
+            else if (linked && next_pc == link.into)
+            {
+               // A pre-check going into its loop: the same wait goes on in the loop
+               m_sync_loop_pc = link.loop_pc;
+            }
+            else if (m_sync_passed)
+            {
+               // The wait ends at this branch; the next check of the variable may still be its loop (pre-check)
+               m_lone.var = var;
+               m_lone.pc = m_sync_check_pc;
+               m_lone.branch_pc = pc;
+               m_lone.taken = next_pc;
+               m_lone.other = otherSuccessor(inst, next_pc);
+               m_lone.first_real = 0;
+               m_lone.insns_since = 0;
+               m_lone.valid = !linked;   // a linked pre-check going elsewhere has left the wait
+               m_lone.chained = m_sync_provisional;
+               m_sync_addr = 0;
+               m_sync_provisional = false;
+            }
+            else if ((linked && injectSpinLoop(inst, next_inst, var, link.loop_pc)) ||
+                     injectFallback(inst, next_inst, var, m_sync_check_pc))
+            {
+               m_other_thread_holds_lock = true;   // held at this check until the write commits
+            }
+            else
+               tracker->reportStuck(var, tid, "STUCK: cannot hold the thread (no loop to replay)", 0, prfmdl->getElapsedTime());
+         }
+      }
+
+      if (inst.is_branch)
+         m_sync_branch_since_check = true;
+   }
+   // The wait on a lock ends when the trace leaves its spin loop (and is not kept in it by a replay)
+   if (m_wait_base != 0 && inst.is_branch && !m_other_thread_holds_lock)
+   {
+      IntPtr lo = 0, hi = 0;
+      getSpinLoop(m_wait_base, m_wait_check_pc, lo, hi);
+      IntPtr pc = inst.sinst->addr;
+      IntPtr next_pc = next_inst.sinst->addr;
+      bool stays = (lo != 0)
+         ? ((next_pc >= lo && next_pc <= hi) || (pc < next_pc && next_pc <= lo))
+         : (next_pc <= m_wait_check_pc);
+      if (!stays)
+         m_wait_base = 0;
+   }
+
    return false;
 }
 
@@ -1880,6 +2652,9 @@ void TraceThread::m_run_func_default()
    }
 
    printf("[TRACE:%u] -- %s --\n", m_thread->getId(), m_stop ? "STOP" : "DONE");
+   printf("[REPLAY SUMMARY] Thread %u: %lu spin iterations injected (%lu insns), %lu recorded spin insns skipped (%lu sync waits cut short)\n",
+          m_thread->getId(), (unsigned long)m_replays, (unsigned long)m_injected_insns,
+          (unsigned long)m_skipped_insns, (unsigned long)m_sync_skips);
    
    // Clean up ChampSim instruction cache to avoid leaks (destructor is never called)
    if (m_champsim_trace) {

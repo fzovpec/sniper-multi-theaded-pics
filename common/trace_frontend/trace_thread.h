@@ -8,10 +8,13 @@
 #include "sift_reader.h"
 #include "operand.h"
 #include "sniper_semaphore.h"
+#include "lock.h"
 
 #include <decoder.h>
 
 #include <unordered_map>
+#include <unordered_set>
+#include <map>
 #include <deque>
 
 #define NUM_PAPI_COUNTERS 6
@@ -141,9 +144,126 @@ class TraceThread : public Runnable
       // Last spin-loop load of a lock variable that was not followed by a branch yet (0 if none)
       IntPtr m_claim_load_pc;
       IntPtr m_claim_addr;
+      // Last check of a tracked variable
+      IntPtr m_check_pc;
+      IntPtr m_check_base;
+      // Current wait on any tracked variable (lock or sync): from its first check until the trace leaves the spin loop (0 if none).
+      // Its start, at the first check at a spin load, is reported to the Lock State Tracker (lock pattern of the thread).
+      IntPtr m_wait_base;
+      IntPtr m_wait_check_pc;
+      bool m_wait_reported;
+      // Current wait on a sync variable (base address, 0 if none). One wait uses one write by another thread.
+      // It lasts while the trace stays in the range of the spin loop that bounds it (m_sync_loop_pc), or, for a check with
+      // no known loop, until the branch after the check. Whether a check opens a new wait is decided at the check.
+      IntPtr m_sync_addr;
+      IntPtr m_sync_check_pc;       // PC of the last check of the variable in this wait
+      IntPtr m_sync_loop_pc;        // load PC of the stored spin loop that bounds this wait (0: none known)
+      bool m_sync_passed;           // a write by another thread was there for this wait
+      bool m_sync_provisional;      // reached a check with no stored loop straight from a passed lone check: same wait for
+                                    // now, settled when that check's loop is learned (m_prov_lone)
+      bool m_sync_branch_since_check;   // a branch was executed since the last check (read-modify-write rule)
+      bool m_sync_wait_reported;    // the start of this wait was reported to the tracker (lock pattern)
+      // Last lone check of a sync variable (no known loop at its PC) whose wait passed and ended at its branch: if the next
+      // check of the variable comes soon, with no store to it in between, it may be the same wait (pre-check of a loop)
+      struct LoneCheck
+      {
+         IntPtr var;
+         IntPtr pc;           // the check
+         IntPtr branch_pc;    // the branch after it
+         IntPtr taken;        // where the trace went from that branch
+         IntPtr other;        // the branch's other successor (0 if unknown)
+         IntPtr first_real;   // first instruction after the branch that is not a nop (0 until seen)
+         UInt64 insns_since;
+         bool valid;
+         bool chained;        // it ended a provisional wait: that wait's original lone check (m_prov_lone) still applies
+         LoneCheck() : var(0), pc(0), branch_pc(0), taken(0), other(0), first_real(0), insns_since(0), valid(false), chained(false) {}
+      };
+      static const UInt64 LONE_WINDOW = 512;   // instructions after a lone check within which a check can be its loop
+      LoneCheck m_lone;
+      LoneCheck m_prov_lone;   // the lone check a provisional wait came from
+      // Path of this thread since its last check of a tracked variable (to learn the spin loop at that check)
+      static const size_t MAX_PATH = 8192;
+      IntPtr m_path_var;
+      IntPtr m_path_pc;
+      std::vector<Sift::Instruction> m_path;
+      bool m_path_overflow;
+      // Earlier waits of this thread, counted here in the frontend (where waits are decided; it never runs a wrong path)
+      // from its reads of any address: a visit is a run of reads of an address with no store by the thread in between;
+      // a read followed by a store to the same address with no branch in between is a read-modify-write, not a visit.
+      // Per load PC (memory bounded by the code size): the address it last read and the visits to it.
+      struct PcVisits
+      {
+         IntPtr addr;
+         UInt64 visits;
+         PcVisits() : addr(0), visits(0) {}
+      };
+      std::unordered_map<IntPtr, PcVisits> m_pc_visits;
+      std::unordered_map<IntPtr, IntPtr> m_visit_addrs;     // addresses read since the last store (visits in progress) -> load PC
+      std::unordered_set<IntPtr> m_reads_since_branch;      // addresses read since the last branch
+      std::unordered_set<IntPtr> m_provided_vars;           // tracked variables whose earlier waits were handed to the tracker
+      void countVisits(Sift::Instruction &inst);
+      // Visits to addr completed so far (a visit still in progress is the current wait, not an earlier one)
+      UInt64 frontendEarlierWaits(IntPtr addr) const;
+      // Instructions still to come that a replay injected (not the held branch itself): they only re-check the
+      // variable, the wait's boundaries are decided at the held branch when the replay comes back to it
+      UInt64 m_synthetic_left;
+      bool m_path_clean;        // no injected instruction pending when the path started
+      UInt64 m_path_replays;    // m_replays when the path started: a replay during the path makes it unusable
+      // Totals printed when the thread ends
+      UInt64 m_replays;          // spin loop iterations injected
+      UInt64 m_injected_insns;   // instructions injected by those iterations
+      UInt64 m_skipped_insns;    // recorded spin instructions not simulated
+      UInt64 m_sync_skips;       // recorded spins cut short after a sync wait passed
       std::deque<Sift::Instruction> m_injected_trace;
       std::unordered_map<IntPtr, Sift::Instruction> m_sift_loop_insts;
       std::deque<IntPtr> m_sift_loop_order;
+
+      // Spin loop of a lock or sync variable at one load PC (a site), shared by all threads. A variable can be waited on
+      // in several loops (e.g. one per inlined barrier), so the key is (variable, load PC). Learned from the path a
+      // thread took from the load back to the same load during a spin reported by the spin loop detector:
+      // [lo, hi] = PC range of that path, exits = successors of its branches outside the range,
+      // insts = that iteration starting at the load (static instructions are copies owned by the store).
+      struct SpinLoop
+      {
+         IntPtr lo;
+         IntPtr hi;
+         std::vector<IntPtr> exits;
+         std::vector<Sift::Instruction> insts;
+      };
+      static Lock s_spin_loops_lock;
+      static std::map<std::pair<IntPtr, IntPtr>, SpinLoop> s_spin_loops;   // (variable base address, load PC) -> spin loop
+      static std::map<IntPtr, IntPtr> s_last_loop;                         // variable -> load PC of its last stored loop
+      // Pre-check of a loop: (variable, PC of the lone check) -> load PC of the loop and the successor of the pre-check's
+      // branch that goes into it
+      struct PreCheckLink
+      {
+         IntPtr loop_pc;
+         IntPtr into;
+      };
+      static std::map<std::pair<IntPtr, IntPtr>, PreCheckLink> s_prechecks;
+
+      // PC range of the stored spin loop of the variable at load PC load_pc, false if none is stored
+      bool getSpinLoop(IntPtr var_base, IntPtr load_pc, IntPtr &lo, IntPtr &hi);
+      bool getSpinLoopInfo(IntPtr var_base, IntPtr load_pc, IntPtr &lo, IntPtr &hi, std::vector<IntPtr> &exits);
+      // Store m_path (the path from load_pc back to it) as the spin loop of the variable at load_pc, if none is stored yet
+      void learnSpinLoopFromPath(IntPtr var_base, IntPtr load_pc);
+      // Make the branch inst go into the stored spin loop of the variable at load_pc and inject one iteration of it,
+      // then come back to the trace at next_inst. Returns false if no loop is stored for them.
+      bool injectSpinLoop(Sift::Instruction &inst, Sift::Instruction &next_inst, IntPtr var_base, IntPtr load_pc);
+      // Replay for a thread held at branch inst with no loop of its own: the variable's last stored loop, else what this
+      // thread executed from the check up to this branch. False if neither is possible.
+      bool injectFallback(Sift::Instruction &inst, Sift::Instruction &next_inst, IntPtr var_base, IntPtr check_pc);
+      // After a pass: skip the rest of the recorded spin in [lo, hi]; the trace resumes at the last time it was at
+      // next_inst's PC before leaving the range
+      void cutShortSpin(Sift::Instruction &inst, Sift::Instruction &next_inst, IntPtr var_base, IntPtr lo, IntPtr hi, PerformanceModel *prfmdl);
+      // Is lone check 'lone' the pre-check of the loop at (var_base, loop_pc)? (its branch went into the loop: the first
+      // non-nop instruction after it is in the loop's range, or its other successor is an exit of the loop)
+      bool isPreCheckOf(const LoneCheck &lone, IntPtr var_base, IntPtr loop_pc);
+      void linkPreCheck(const LoneCheck &lone, IntPtr var_base, IntPtr loop_pc);
+      // Decoding helpers
+      const dl::DecodedInst &decoded(Sift::Instruction &inst);
+      bool storesTo(Sift::Instruction &inst, IntPtr var_base);
+      IntPtr otherSuccessor(Sift::Instruction &inst, IntPtr taken_pc);
 
       bool readNextAppInstruction(Sift::Instruction &inst_out);
       // Returns true if inst is a spin loop instruction that must be skipped (not simulated)
